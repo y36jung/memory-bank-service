@@ -2,23 +2,55 @@
   "name": "memory-bank-service",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc --project tsconfig.build.json",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
+    "lint": "eslint src --no-error-on-unmatched-pattern",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
+    "@fastify/jwt": "^9.0.0",
+    "@fastify/multipart": "^9.0.0",
+    "@qdrant/js-client-rest": "^1.13.0",
+    "@xenova/transformers": "^2.17.2",
+    "bcrypt": "^5.1.1",
+    "bullmq": "^5.51.0",
     "drizzle-orm": "^0.45.2",
-    "pg": "^8.20.0"
+    "fastify": "^5.3.2",
+    "fastify-plugin": "^5.0.1",
+    "fp-ts": "^2.16.9",
+    "ioredis": "^5.6.1",
+    "openai": "^4.97.0",
+    "pdfjs-dist": "^5.2.133",
+    "pg": "^8.20.0",
+    "resend": "^4.5.1",
+    "tiktoken": "^1.0.21",
+    "zod": "^3.24.4",
+    "zod-to-json-schema": "^3.24.5"
   },
   "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
     "@types/node": "^25.6.0",
     "@types/pg": "^8.20.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "drizzle-kit": "^0.31.10",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "husky": "^9.0.0",
+    "prettier": "^3.0.0",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "tsx": "^4.19.4",
+    "typescript": "^6.0.3",
+    "vitest": "^3.0.0"
   }
 }

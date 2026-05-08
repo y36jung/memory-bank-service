@@ -44,6 +44,7 @@ const createTaskSchema = { body: zodToJsonSchema(createTaskBody) };
 ```
 
 Use `.safeParse()` when you need the error without throwing; use `.parse()` when a ZodError should propagate:
+
 ```typescript
 const result = createTaskBody.safeParse(req.body);
 if (!result.success) return reply.code(400).send(result.error.format());
@@ -73,9 +74,13 @@ fastify.setErrorHandler((error, _req, reply) => {
     return reply.code(400).send({ error: 'validation', details: error.validation });
 
   const statusMap: Record<AppError['kind'], number> = {
-    not_found: 404, validation: 400, upstream: 502,
+    not_found: 404,
+    validation: 400,
+    upstream: 502,
   };
-  return reply.code(statusMap[(error as AppError).kind] ?? 500).send({ error: (error as AppError).kind });
+  return reply
+    .code(statusMap[(error as AppError).kind] ?? 500)
+    .send({ error: (error as AppError).kind });
 });
 ```
 
@@ -94,9 +99,12 @@ const protectedPlugin: FastifyPluginAsync = async (fastify) => {
 ```
 
 Extend the request type:
+
 ```typescript
 declare module 'fastify' {
-  interface FastifyRequest { user: { id: string; email: string }; }
+  interface FastifyRequest {
+    user: { id: string; email: string };
+  }
 }
 ```
 

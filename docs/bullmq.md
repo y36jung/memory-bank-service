@@ -15,14 +15,18 @@ async function pollOutbox(db: Db) {
   const events = await db
     .update(outbox)
     .set({ status: 'processing', updatedAt: new Date() })
-    .where(and(eq(outbox.status, 'pending'), lte(outbox.runAfter, new Date()), lte(outbox.attempts, 5)))
+    .where(
+      and(eq(outbox.status, 'pending'), lte(outbox.runAfter, new Date()), lte(outbox.attempts, 5)),
+    )
     .returning();
 
-  await Promise.allSettled(events.map(async (event) => {
-    const result = await dispatch(event)();
-    if (E.isLeft(result)) await markFailed(event.id, result.left)();
-    else await markComplete(event.id)();
-  }));
+  await Promise.allSettled(
+    events.map(async (event) => {
+      const result = await dispatch(event)();
+      if (E.isLeft(result)) await markFailed(event.id, result.left)();
+      else await markComplete(event.id)();
+    }),
+  );
 }
 ```
 
@@ -34,12 +38,16 @@ Return `TE.TaskEither` — no try/catch inside:
 const dispatch = (event: OutboxEvent): TE.TaskEither<AppError, void> =>
   pipe(
     TE.of(event),
-    TE.flatMap(e => {
+    TE.flatMap((e) => {
       switch (e.eventType) {
-        case 'ingest':     return runIngestionPipeline(e);
-        case 'reindex':    return reindexRecord(e);
-        case 'delete':     return deleteQdrantPoints(e.payload.chunkIds);
-        case 'notify-due': return sendDueReminder(e);
+        case 'ingest':
+          return runIngestionPipeline(e);
+        case 'reindex':
+          return reindexRecord(e);
+        case 'delete':
+          return deleteQdrantPoints(e.payload.chunkIds);
+        case 'notify-due':
+          return sendDueReminder(e);
       }
     }),
   );
@@ -54,19 +62,23 @@ const markFailed = (id: string, err: AppError): TE.TaskEither<AppError, void> =>
   pipe(
     TE.tryCatch(
       () => db.query.outbox.findFirst({ where: eq(outbox.id, id) }),
-      (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause })
+      (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
     ),
-    TE.flatMap(event => {
+    TE.flatMap((event) => {
       const attempts = (event?.attempts ?? 0) + 1;
       const backoffMs = Math.min(2 ** attempts * 10_000, 600_000);
       return TE.tryCatch(
-        () => db.update(outbox).set({
-          status: attempts >= 5 ? 'failed' : 'pending',
-          attempts,
-          lastError: JSON.stringify(err),
-          runAfter: new Date(Date.now() + backoffMs),
-        }).where(eq(outbox.id, id)),
-        (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause })
+        () =>
+          db
+            .update(outbox)
+            .set({
+              status: attempts >= 5 ? 'failed' : 'pending',
+              attempts,
+              lastError: JSON.stringify(err),
+              runAfter: new Date(Date.now() + backoffMs),
+            })
+            .where(eq(outbox.id, id)),
+        (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
       );
     }),
     TE.map(() => undefined),
@@ -78,16 +90,27 @@ After 5 attempts row stays `failed` — never silently dropped.
 ## BullMQ (Cron Jobs)
 
 ```typescript
-interface PatternJobData { userId: string; since: string; }
-interface PatternJobResult { patternsUpserted: number; }
+interface PatternJobData {
+  userId: string;
+  since: string;
+}
+interface PatternJobResult {
+  patternsUpserted: number;
+}
 
-const queue = new Queue<PatternJobData, PatternJobResult>('pattern-extraction', { connection: redis });
-
-await queue.add('weekly', {}, {
-  repeat: { pattern: '0 3 * * 1' },
-  removeOnComplete: 100,
-  removeOnFail: 50,
+const queue = new Queue<PatternJobData, PatternJobResult>('pattern-extraction', {
+  connection: redis,
 });
+
+await queue.add(
+  'weekly',
+  {},
+  {
+    repeat: { pattern: '0 3 * * 1' },
+    removeOnComplete: 100,
+    removeOnFail: 50,
+  },
+);
 
 // Unwrap TE at the BullMQ worker boundary
 const worker = new Worker<PatternJobData, PatternJobResult>(
@@ -97,7 +120,7 @@ const worker = new Worker<PatternJobData, PatternJobResult>(
     if (E.isLeft(result)) throw new Error(JSON.stringify(result.left));
     return result.right;
   },
-  { connection: redis, concurrency: 2 }
+  { connection: redis, concurrency: 2 },
 );
 
 worker.on('failed', (job, err) => logger.error({ jobId: job?.id, err }, 'job failed'));
@@ -108,13 +131,17 @@ worker.on('failed', (job, err) => logger.error({ jobId: job?.id, err }, 'job fai
 ```typescript
 const reconcileStuck = (): TE.TaskEither<AppError, void> =>
   TE.tryCatch(
-    () => db.update(outbox)
-      .set({ status: 'pending', runAfter: new Date() })
-      .where(and(
-        eq(outbox.status, 'processing'),
-        lte(outbox.updatedAt, new Date(Date.now() - 10 * 60 * 1000)),
-      )),
-    (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause })
+    () =>
+      db
+        .update(outbox)
+        .set({ status: 'pending', runAfter: new Date() })
+        .where(
+          and(
+            eq(outbox.status, 'processing'),
+            lte(outbox.updatedAt, new Date(Date.now() - 10 * 60 * 1000)),
+          ),
+        ),
+    (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
   );
 ```
 

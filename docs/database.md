@@ -9,7 +9,9 @@ Define schema in `src/db/schema.ts`. Schema is the source of truth for both quer
 ```typescript
 export const tasks = pgTable('tasks', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   title: varchar('title', { length: 500 }).notNull(),
   status: taskStatusEnum('status').notNull().default('pending'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -41,10 +43,13 @@ import { pipe } from 'fp-ts/function';
 
 const fetchUserTasks = (userId: string): TE.TaskEither<AppError, Task[]> =>
   TE.tryCatch(
-    () => db.select().from(tasks)
-      .where(and(eq(tasks.userId, userId), eq(tasks.status, 'pending')))
-      .orderBy(desc(tasks.createdAt)),
-    (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause })
+    () =>
+      db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.userId, userId), eq(tasks.status, 'pending')))
+        .orderBy(desc(tasks.createdAt)),
+    (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
   );
 ```
 
@@ -54,19 +59,27 @@ Entity resolution — exact then fuzzy (raw SQL acceptable for `pg_trgm`):
 const resolveEntity = (userId: string, mention: string): TE.TaskEither<AppError, string | null> =>
   pipe(
     TE.tryCatch(
-      () => db.select().from(topics)
-        .where(and(eq(topics.userId, userId), ilike(topics.name, mention))).limit(1),
-      (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause })
+      () =>
+        db
+          .select()
+          .from(topics)
+          .where(and(eq(topics.userId, userId), ilike(topics.name, mention)))
+          .limit(1),
+      (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
     ),
-    TE.flatMap(exact =>
+    TE.flatMap((exact) =>
       exact.length > 0
         ? TE.right(exact[0].id)
         : TE.tryCatch(
-            () => db.execute(sql`SELECT id FROM topics WHERE user_id = ${userId}
-                ORDER BY similarity(name, ${mention}) DESC LIMIT 1`)
-              .then(r => r.rows[0]?.id ?? null),
-            (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause })
-          )
+            () =>
+              db
+                .execute(
+                  sql`SELECT id FROM topics WHERE user_id = ${userId}
+                ORDER BY similarity(name, ${mention}) DESC LIMIT 1`,
+                )
+                .then((r) => r.rows[0]?.id ?? null),
+            (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
+          ),
     ),
   );
 ```
@@ -78,19 +91,24 @@ Wrap the entire transaction in `TE.tryCatch` — one atomic boundary:
 ```typescript
 const createTaskWithOutbox = (taskData: NewTask): TE.TaskEither<AppError, Task> =>
   TE.tryCatch(
-    () => db.transaction(async (tx) => {
-      const [task] = await tx.insert(tasks).values(taskData).returning();
-      await tx.insert(outbox).values({
-        eventType: 'ingest', sourceKind: 'task',
-        sourceId: task.id, userId: task.userId, status: 'pending',
-      });
-      return task;
-    }),
-    (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause })
+    () =>
+      db.transaction(async (tx) => {
+        const [task] = await tx.insert(tasks).values(taskData).returning();
+        await tx.insert(outbox).values({
+          eventType: 'ingest',
+          sourceKind: 'task',
+          sourceId: task.id,
+          userId: task.userId,
+          status: 'pending',
+        });
+        return task;
+      }),
+    (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
   );
 ```
 
 Write reciprocal links in one transaction:
+
 ```typescript
 await tx.insert(links).values([
   { sourceId, targetId, confidence, origin },
@@ -107,8 +125,8 @@ import { sequenceT } from 'fp-ts/Apply';
 
 const retrieveParallel = (params: SearchParams) =>
   sequenceT(TE.ApplyPar)(
-    hybridSearch(params),    // TE.TaskEither<AppError, QdrantResult[]>
-    graphTraversal(params),  // TE.TaskEither<AppError, LinkedChunk[]>
+    hybridSearch(params), // TE.TaskEither<AppError, QdrantResult[]>
+    graphTraversal(params), // TE.TaskEither<AppError, LinkedChunk[]>
   );
 
 // Returns TE.TaskEither<AppError, [QdrantResult[], LinkedChunk[]]>
@@ -120,15 +138,21 @@ const retrieveParallel = (params: SearchParams) =>
 ```typescript
 const upsertChunks = (chunks: Chunk[], meta: ChunkMeta): TE.TaskEither<AppError, void> =>
   TE.tryCatch(
-    () => qdrant.upsert('memory_chunks', {
-      wait: true,
-      points: chunks.map((c, i) => ({
-        id: c.chunkId,
-        vector: { default: c.denseVector, bm25: c.sparseVector },
-        payload: { content: c.text, ...meta, chunk_index: i, created_at: new Date().toISOString() },
-      })),
-    }),
-    (cause): AppError => ({ kind: 'upstream', service: 'qdrant', cause })
+    () =>
+      qdrant.upsert('memory_chunks', {
+        wait: true,
+        points: chunks.map((c, i) => ({
+          id: c.chunkId,
+          vector: { default: c.denseVector, bm25: c.sparseVector },
+          payload: {
+            content: c.text,
+            ...meta,
+            chunk_index: i,
+            created_at: new Date().toISOString(),
+          },
+        })),
+      }),
+    (cause): AppError => ({ kind: 'upstream', service: 'qdrant', cause }),
   );
 ```
 
@@ -141,22 +165,23 @@ Qdrant supports RRF natively via the Query API:
 ```typescript
 const hybridSearch = (params: SearchParams): TE.TaskEither<AppError, QdrantResult[]> =>
   TE.tryCatch(
-    () => qdrant.query('memory_chunks', {
-      prefetch: [
-        { query: params.denseVector, using: 'default', limit: 20 },
-        { query: params.sparseVector, using: 'bm25', limit: 20 },
-      ],
-      query: { fusion: 'rrf' },
-      filter: {
-        must: [
-          { key: 'user_id', match: { value: params.userId } },
-          ...(params.topicId ? [{ key: 'topic_id', match: { value: params.topicId } }] : []),
+    () =>
+      qdrant.query('memory_chunks', {
+        prefetch: [
+          { query: params.denseVector, using: 'default', limit: 20 },
+          { query: params.sparseVector, using: 'bm25', limit: 20 },
         ],
-      },
-      limit: 20,
-      with_payload: true,
-    }),
-    (cause): AppError => ({ kind: 'upstream', service: 'qdrant', cause })
+        query: { fusion: 'rrf' },
+        filter: {
+          must: [
+            { key: 'user_id', match: { value: params.userId } },
+            ...(params.topicId ? [{ key: 'topic_id', match: { value: params.topicId } }] : []),
+          ],
+        },
+        limit: 20,
+        with_payload: true,
+      }),
+    (cause): AppError => ({ kind: 'upstream', service: 'qdrant', cause }),
   );
 ```
 
@@ -168,7 +193,7 @@ Delete by chunk IDs from outbox payload — never query-then-delete:
 const deleteChunks = (chunkIds: string[]): TE.TaskEither<AppError, void> =>
   TE.tryCatch(
     () => qdrant.delete('memory_chunks', { wait: true, points: chunkIds }),
-    (cause): AppError => ({ kind: 'upstream', service: 'qdrant', cause })
+    (cause): AppError => ({ kind: 'upstream', service: 'qdrant', cause }),
   );
 ```
 
@@ -181,7 +206,7 @@ const ingest = (event: OutboxEvent): TE.TaskEither<AppError, void> =>
     TE.flatMap(hashCheck),
     TE.flatMap(chunk),
     TE.flatMap(embedChunks),
-    TE.flatMap(chunks => upsertChunks(chunks, toMeta(event))),
+    TE.flatMap((chunks) => upsertChunks(chunks, toMeta(event))),
     TE.flatMap(() => markComplete(event.id)),
   );
 ```
