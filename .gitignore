@@ -23,3 +23,6 @@ npm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Husky auto-generated
+.husky/_/
