@@ -1,0 +1,5 @@
+#!/bin/sh
+npx prettier --check . &&
+npm run lint &&
+npm run typecheck &&
+npm run test

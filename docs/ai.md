@@ -4,12 +4,12 @@
 
 ## Model Selection
 
-| Use case | Model | Reason |
-|----------|-------|--------|
-| Auto-linking, intent classify, metadata extract | `gpt-4o-mini` | Cost ~$0.000135/item, fast |
-| Query answer generation | `gpt-4o` (SSE) | User-facing quality |
-| Pattern extraction (weekly) | `gpt-4o` | Complex reasoning over task history |
-| Agent loops (query, recommendation) | `claude-sonnet-4-6` | Best tool-use accuracy |
+| Use case                                        | Model               | Reason                              |
+| ----------------------------------------------- | ------------------- | ----------------------------------- |
+| Auto-linking, intent classify, metadata extract | `gpt-4o-mini`       | Cost ~$0.000135/item, fast          |
+| Query answer generation                         | `gpt-4o` (SSE)      | User-facing quality                 |
+| Pattern extraction (weekly)                     | `gpt-4o`            | Complex reasoning over task history |
+| Agent loops (query, recommendation)             | `claude-sonnet-4-6` | Best tool-use accuracy              |
 
 Default to `gpt-4o-mini` for non-user-facing calls. Upgrade only when quality is measurably insufficient.
 
@@ -33,9 +33,11 @@ import * as TE from 'fp-ts/TaskEither';
 
 const embedBatch = (texts: string[]): TE.TaskEither<AppError, number[][]> =>
   TE.tryCatch(
-    () => openai.embeddings.create({ model: 'text-embedding-3-small', input: texts })
-          .then(r => r.data.map(d => d.embedding)),
-    (cause): AppError => ({ kind: 'upstream', service: 'openai', cause })
+    () =>
+      openai.embeddings
+        .create({ model: 'text-embedding-3-small', input: texts })
+        .then((r) => r.data.map((d) => d.embedding)),
+    (cause): AppError => ({ kind: 'upstream', service: 'openai', cause }),
   );
 ```
 
@@ -52,33 +54,41 @@ import * as E from 'fp-ts/Either';
 const extractMetadata = (query: string): TE.TaskEither<AppError, QueryMetadata> =>
   pipe(
     TE.tryCatch(
-      () => openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: buildMetadataPrompt(query) }],
-        response_format: {
-          type: 'json_schema',
-          json_schema: { name: 'query_metadata', schema: zodToJsonSchema(queryMetadataSchema), strict: true },
-        },
-      }),
-      (cause): AppError => ({ kind: 'upstream', service: 'openai', cause })
+      () =>
+        openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: buildMetadataPrompt(query) }],
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'query_metadata',
+              schema: zodToJsonSchema(queryMetadataSchema),
+              strict: true,
+            },
+          },
+        }),
+      (cause): AppError => ({ kind: 'upstream', service: 'openai', cause }),
     ),
-    TE.flatMap(res =>
-      TE.fromEither(E.tryCatch(
-        () => queryMetadataSchema.parse(JSON.parse(res.choices[0].message.content!)),
-        (cause): AppError => ({ kind: 'validation', message: String(cause) })
-      ))
+    TE.flatMap((res) =>
+      TE.fromEither(
+        E.tryCatch(
+          () => queryMetadataSchema.parse(JSON.parse(res.choices[0].message.content!)),
+          (cause): AppError => ({ kind: 'validation', message: String(cause) }),
+        ),
+      ),
     ),
   );
 ```
 
 ## Tool Definitions (Anthropic)
 
-Each tool needs: `name`, `description` (what it does and *when* to call it), `input_schema` (JSON Schema):
+Each tool needs: `name`, `description` (what it does and _when_ to call it), `input_schema` (JSON Schema):
 
 ```typescript
 const resolveEntityTool = {
   name: 'resolve_entity',
-  description: 'Resolve a topic name mention to its UUID. Call before filtering search results by topic.',
+  description:
+    'Resolve a topic name mention to its UUID. Call before filtering search results by topic.',
   input_schema: {
     type: 'object',
     properties: {
@@ -98,14 +108,18 @@ import { sequenceT } from 'fp-ts/Apply';
 
 const executeTools = (blocks: ToolUseBlock[]): TE.TaskEither<AppError, ToolResult[]> =>
   pipe(
-    blocks.map(b =>
+    blocks.map((b) =>
       pipe(
         callTool(b.name, b.input),
-        TE.map(result => ({ type: 'tool_result' as const, tool_use_id: b.id, content: JSON.stringify(result) }))
-      )
+        TE.map((result) => ({
+          type: 'tool_result' as const,
+          tool_use_id: b.id,
+          content: JSON.stringify(result),
+        })),
+      ),
     ),
     TE.sequenceArray,
-    TE.map(results => [...results]),
+    TE.map((results) => [...results]),
   );
 
 const runAgent = (userQuery: string): TE.TaskEither<AppError, string> =>
@@ -114,12 +128,14 @@ const runAgent = (userQuery: string): TE.TaskEither<AppError, string> =>
       const messages: MessageParam[] = [{ role: 'user', content: userQuery }];
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         const response = await anthropic.messages.create({
-          model: 'claude-sonnet-4-6', max_tokens: 1024,
-          tools: [resolveEntityTool, searchMemoryTool], messages,
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1024,
+          tools: [resolveEntityTool, searchMemoryTool],
+          messages,
         });
         if (response.stop_reason === 'end_turn') return extractText(response.content);
-        const toolBlocks = response.content.filter(b => b.type === 'tool_use') as ToolUseBlock[];
-        const toolResults = await executeTools(toolBlocks)().then(r => {
+        const toolBlocks = response.content.filter((b) => b.type === 'tool_use') as ToolUseBlock[];
+        const toolResults = await executeTools(toolBlocks)().then((r) => {
           if (E.isLeft(r)) throw r.left;
           return r.right;
         });
@@ -128,7 +144,7 @@ const runAgent = (userQuery: string): TE.TaskEither<AppError, string> =>
       }
       throw new Error('agent exceeded max iterations');
     },
-    (cause): AppError => ({ kind: 'upstream', service: 'anthropic', cause })
+    (cause): AppError => ({ kind: 'upstream', service: 'anthropic', cause }),
   );
 ```
 

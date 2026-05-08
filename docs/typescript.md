@@ -43,6 +43,7 @@ type AppError =
 ```
 
 Exhaustive switch via `satisfies never`:
+
 ```typescript
 default: err satisfies never; // compile error if a case is missing
 ```
@@ -60,9 +61,11 @@ import { pipe } from 'fp-ts/function';
 
 const embed = (text: string): TE.TaskEither<AppError, number[]> =>
   TE.tryCatch(
-    () => openai.embeddings.create({ model: 'text-embedding-3-small', input: text })
-          .then(r => r.data[0].embedding),
-    (cause): AppError => ({ kind: 'upstream', service: 'openai', cause })
+    () =>
+      openai.embeddings
+        .create({ model: 'text-embedding-3-small', input: text })
+        .then((r) => r.data[0].embedding),
+    (cause): AppError => ({ kind: 'upstream', service: 'openai', cause }),
   );
 
 const pipeline = (input: RawInput) =>
@@ -77,16 +80,17 @@ Never mix `try/catch` with `TE` inside a pipeline.
 
 ## Naming
 
-| Thing | Style | Example |
-|-------|-------|---------|
-| Types/Interfaces | PascalCase | `SearchChunk` |
-| Functions | camelCase | `resolveEntity` |
-| Files | kebab-case | `outbox-worker.ts` |
-| Zod schemas | camelCase + `Schema` | `createTaskSchema` |
+| Thing            | Style                | Example            |
+| ---------------- | -------------------- | ------------------ |
+| Types/Interfaces | PascalCase           | `SearchChunk`      |
+| Functions        | camelCase            | `resolveEntity`    |
+| Files            | kebab-case           | `outbox-worker.ts` |
+| Zod schemas      | camelCase + `Schema` | `createTaskSchema` |
 
 ## Imports
 
 Path aliases — no `../../../` chains:
+
 ```json
 { "paths": { "@db/*": ["src/db/*"], "@services/*": ["src/services/*"] } }
 ```

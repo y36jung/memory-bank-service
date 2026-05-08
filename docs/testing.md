@@ -4,11 +4,11 @@
 
 ## Test Types
 
-| Type | Scope | Location |
-|------|-------|----------|
-| Unit | Single function/module | Co-located: `service.test.ts` next to `service.ts` |
-| Integration | Service + real DB | `tests/integration/` |
-| E2E | Full HTTP request | `tests/e2e/` |
+| Type        | Scope                  | Location                                           |
+| ----------- | ---------------------- | -------------------------------------------------- |
+| Unit        | Single function/module | Co-located: `service.test.ts` next to `service.ts` |
+| Integration | Service + real DB      | `tests/integration/`                               |
+| E2E         | Full HTTP request      | `tests/e2e/`                                       |
 
 No mocked databases in integration tests — run against real Postgres + Qdrant in Docker.
 
@@ -35,8 +35,10 @@ import * as E from 'fp-ts/Either';
 describe('mergeAndScore', () => {
   it('boosts manual-linked chunks by 0.30', () => {
     const result = mergeAndScore(qdrantResults, [{ chunkId: 'abc', confidence: 1.0 }]);
-    expect(result.find(r => r.chunkId === 'abc')!.finalScore)
-      .toBeCloseTo(qdrantResults[0].score + 0.30, 5);
+    expect(result.find((r) => r.chunkId === 'abc')!.finalScore).toBeCloseTo(
+      qdrantResults[0].score + 0.3,
+      5,
+    );
   });
 });
 ```
@@ -49,10 +51,18 @@ Reset state between tests with transaction rollback — no truncate:
 import { beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
 let db: Db;
-beforeAll(async () => { db = await createTestDb(); });
-afterAll(async () => { await db.end(); });
-beforeEach(async () => { await db.execute(sql`BEGIN`); });
-afterEach(async () => { await db.execute(sql`ROLLBACK`); });
+beforeAll(async () => {
+  db = await createTestDb();
+});
+afterAll(async () => {
+  await db.end();
+});
+beforeEach(async () => {
+  await db.execute(sql`BEGIN`);
+});
+afterEach(async () => {
+  await db.execute(sql`ROLLBACK`);
+});
 
 it('creates task and outbox event atomically', async () => {
   await taskService.create(db, { title: 'Test', userId: TEST_USER_ID });
@@ -86,12 +96,15 @@ Always clear mocks between tests per Vitest docs — use `vi.clearAllMocks()` in
 
 ```typescript
 // vitest.config.ts
-test: { clearMocks: true }
+test: {
+  clearMocks: true;
+}
 ```
 
 ## Mocking BullMQ
 
 Unit tests — mock the module entirely:
+
 ```typescript
 vi.mock('bullmq', () => ({
   Queue: vi.fn().mockImplementation(() => ({ add: vi.fn() })),
@@ -133,6 +146,7 @@ it('returns left on upstream failure', async () => {
 ```
 
 SSE:
+
 ```typescript
 const events: StreamEvent[] = [];
 for await (const event of collectSSE(response)) events.push(event);
@@ -141,13 +155,13 @@ expect(events.at(-1)?.type).toBe('done');
 
 ## Coverage Targets
 
-| Area | Target |
-|------|--------|
-| Scoring / merge logic | 100% |
-| Error-type narrowing | 100% |
-| Service layer | 80%+ |
+| Area                                               | Target   |
+| -------------------------------------------------- | -------- |
+| Scoring / merge logic                              | 100%     |
+| Error-type narrowing                               | 100%     |
+| Service layer                                      | 80%+     |
 | Integration (happy + one failure path per handler) | required |
-| Generated files (Drizzle schema types, migrations) | skip |
+| Generated files (Drizzle schema types, migrations) | skip     |
 
 ## Avoid
 
