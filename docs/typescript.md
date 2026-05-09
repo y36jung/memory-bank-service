@@ -30,6 +30,18 @@ Both are included in `tsc --init` defaults as of TypeScript 5.9.
 - No `as` casts unless you own both sides
 - Prefer `const`; `let` only when reassignment is necessary
 - Never mutate function parameters — return new values
+- Guard at the source — when a `const` or type requires a null/undefined check before use, export a helper from the same module that owns it; never repeat the guard at call sites
+
+```typescript
+// errors.ts — guard lives here, next to the map it wraps
+export const statusMap: Record<AppError['kind'], number> = { ... };
+export function statusFromKind(kind: AppError['kind'] | undefined): number {
+  return kind != null ? statusMap[kind] : 500;
+}
+
+// app.ts — call site has no null check
+reply.code(statusFromKind(error.kind));
+```
 
 ## Error Types
 
