@@ -10,6 +10,7 @@ Reference these before writing code in any of the areas below.
 | [bullmq.md](bullmq.md)         | Outbox worker, dispatch, retry/backoff, BullMQ cron jobs, job typing                         |
 | [ai.md](ai.md)                 | Model selection, OpenAI/Anthropic clients, embeddings, agent loop, tool design, cost control |
 | [testing.md](testing.md)       | Unit vs integration, real DB pattern, mocking LLMs and BullMQ, coverage targets              |
+| [jsdoc.md](jsdoc.md)           | JSDoc for functions, types, schemas, constants, route handlers                               |
 
 ## Key Cross-Cutting Rules
 
