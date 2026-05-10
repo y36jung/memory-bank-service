@@ -1,6 +1,6 @@
 # Memory Bank — Agent Context
 
-Refer to this file before writing any code. Cross-reference `docs/` for per-topic best practices.
+Refer to this file before writing any code. Cross-reference `docs/practices/` for per-topic best practices.
 
 ---
 
@@ -147,7 +147,7 @@ Use BullMQ for cron; outbox for event-driven. Prevent duplicate fires with `noti
 
 ## Key Patterns
 
-All code must follow these. See `docs/` for full examples.
+All code must follow these. See `docs/practices/` for full examples.
 
 **Every I/O function:**
 
@@ -213,11 +213,12 @@ tests/
 
 ## Best Practice Docs
 
-| File                           | Covers                                                                        |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| [typescript.md](typescript.md) | tsconfig, error types, fp-ts TaskEither                                       |
-| [fastify.md](fastify.md)       | Plugins, Zod validation, auth, SSE                                            |
-| [database.md](database.md)     | Drizzle schema, transactions, Qdrant upsert/search/delete, parallel retrieval |
-| [bullmq.md](bullmq.md)         | Outbox worker, dispatch, retry/backoff, cron jobs                             |
-| [ai.md](ai.md)                 | Model selection, embeddings, structured output, agent loop, tool design       |
-| [testing.md](testing.md)       | Unit/integration structure, LLM mocking, TaskEither assertions                |
+| File                                     | Covers                                                                        |
+| ---------------------------------------- | ----------------------------------------------------------------------------- |
+| [typescript.md](practices/typescript.md) | tsconfig, error types, fp-ts TaskEither                                       |
+| [fastify.md](practices/fastify.md)       | Plugins, Zod validation, auth, SSE                                            |
+| [database.md](practices/database.md)     | Drizzle schema, transactions, Qdrant upsert/search/delete, parallel retrieval |
+| [bullmq.md](practices/bullmq.md)         | Outbox worker, dispatch, retry/backoff, cron jobs                             |
+| [ai.md](practices/ai.md)                 | Model selection, embeddings, structured output, agent loop, tool design       |
+| [testing.md](practices/testing.md)       | Unit/integration structure, LLM mocking, TaskEither assertions                |
+| [jsdoc.md](practices/jsdoc.md)           | JSDoc for functions, types, schemas, constants, route handlers                |

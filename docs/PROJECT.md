@@ -1,12 +1,6 @@
 # Memory Bank — Project Overview
 
-> For architecture and invariants see `AGENT_CONTEXT.md`. For best practices see `BEST_PRACTICES.md`.
-
----
-
-## Goal
-
-Personal AI memory service. Users store heterogeneous data (tasks, notes, PDFs, audio, images) and retrieve it via natural language — without needing to remember where it was stored or how it was organised. The system eliminates cognitive overhead by combining semantic vector search with graph-based record linking.
+> For architecture and invariants see `AGENT_CONTEXT.md`.
 
 ---
 
