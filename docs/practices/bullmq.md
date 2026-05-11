@@ -14,9 +14,13 @@ import { pipe } from 'fp-ts/function';
 async function pollOutbox(db: Db) {
   const events = await db
     .update(outbox)
-    .set({ status: 'processing', updatedAt: new Date() })
+    .set({ status: 'processing' })
     .where(
-      and(eq(outbox.status, 'pending'), lte(outbox.runAfter, new Date()), lte(outbox.attempts, 5)),
+      and(
+        eq(outbox.status, 'pending'),
+        lte(outbox.processAfter, new Date()),
+        lte(outbox.attempts, 5),
+      ),
     )
     .returning();
 
@@ -45,7 +49,7 @@ const dispatch = (event: OutboxEvent): TE.TaskEither<AppError, void> =>
         case 'reindex':
           return reindexRecord(e);
         case 'delete':
-          return deleteQdrantPoints(e.payload.chunkIds);
+          return deleteQdrantPoints(e.sourceId, e.sourceKind);
         case 'notify-due':
           return sendDueReminder(e);
       }
@@ -75,7 +79,7 @@ const markFailed = (id: string, err: AppError): TE.TaskEither<AppError, void> =>
               status: attempts >= 5 ? 'failed' : 'pending',
               attempts,
               lastError: JSON.stringify(err),
-              runAfter: new Date(Date.now() + backoffMs),
+              processAfter: new Date(Date.now() + backoffMs),
             })
             .where(eq(outbox.id, id)),
         (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),
@@ -134,11 +138,11 @@ const reconcileStuck = (): TE.TaskEither<AppError, void> =>
     () =>
       db
         .update(outbox)
-        .set({ status: 'pending', runAfter: new Date() })
+        .set({ status: 'pending', processAfter: new Date() })
         .where(
           and(
             eq(outbox.status, 'processing'),
-            lte(outbox.updatedAt, new Date(Date.now() - 10 * 60 * 1000)),
+            lte(outbox.processAfter, new Date(Date.now() - 10 * 60 * 1000)),
           ),
         ),
     (cause): AppError => ({ kind: 'upstream', service: 'postgres', cause }),

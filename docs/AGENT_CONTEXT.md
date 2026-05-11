@@ -34,7 +34,7 @@ These must never be broken:
 1. **Outbox atomicity** — every source record write (create/update/delete) includes an outbox event in the same Postgres transaction. No exceptions.
 2. **User scoping** — every DB query and Qdrant filter includes `user_id`. Never trust `user_id` from request body — always use `req.user.id`.
 3. **TaskEither pipeline** — all I/O returns `TE.TaskEither<AppError, A>`. No `try/catch` inside pipelines. Unwrap once at the route handler or worker boundary.
-4. **Chunk IDs in delete payload** — collect `chunk_index` IDs before deleting source records (cascade removes them). Carry IDs in the outbox payload.
+4. **chunk_index cleanup on delete** — the delete worker queries `chunk_index` by `(source_id, source_kind)` to locate Qdrant point IDs. `chunk_index.source_id` is not a foreign key — source record deletion does not cascade to `chunk_index`. No payload column exists on outbox; all event data is derived from `source_id` + `source_kind`.
 5. **`wait: true` on Qdrant upsert** — confirms write before marking `chunk_index` complete.
 6. **Hash check before re-embedding** — compare SHA-256 of normalized content against `documents.content_hash`. Skip pipeline if unchanged.
 
@@ -42,29 +42,29 @@ These must never be broken:
 
 ## Schema Summary
 
-| Table         | Purpose                                                               |
-| ------------- | --------------------------------------------------------------------- |
-| `users`       | Auth, timezone (IANA string), row ownership                           |
-| `topics`      | Project containers; entity resolution target                          |
-| `tasks`       | Work items — status, priority, due_date, reminder_job_id              |
-| `documents`   | Normalized text + content_hash + S3 storage_path for binary           |
-| `chunk_index` | Tracks chunk existence and Qdrant sync status (observability only)    |
-| `links`       | Relationships between records — powers graph traversal                |
-| `patterns`    | Weekly-extracted recurring task patterns — feeds recommendation agent |
-| `outbox`      | Pending Qdrant sync events — the durability guarantee                 |
+| Table         | Purpose                                                                |
+| ------------- | ---------------------------------------------------------------------- |
+| `users`       | Auth, timezone (IANA string), row ownership                            |
+| `topics`      | Project containers; entity resolution target                           |
+| `tasks`       | Work items — status, priority, due_date, completed_at, reminder_job_id |
+| `documents`   | Normalized text + content_hash + S3 storage_path for binary            |
+| `chunk_index` | Tracks chunk existence and Qdrant sync status (observability only)     |
+| `links`       | Relationships between records — powers graph traversal                 |
+| `patterns`    | Weekly-extracted recurring task patterns — feeds recommendation agent  |
+| `outbox`      | Pending Qdrant sync events — the durability guarantee                  |
 
-**Required Postgres extensions:** `uuid-ossp` (UUID PKs), `pg_trgm` (fuzzy entity resolution).
+**Required Postgres extensions:** `pg_trgm` (fuzzy entity resolution). `gen_random_uuid()` is built-in since PG 13 — no extension needed for UUID PKs.
 
 ---
 
 ## Outbox Event Types
 
-| `event_type` | Trigger              | Worker action                                  |
-| ------------ | -------------------- | ---------------------------------------------- |
-| `ingest`     | Create               | Normalize → chunk → embed → upsert Qdrant      |
-| `reindex`    | Update               | Delete old Qdrant points → re-run ingest       |
-| `delete`     | Delete               | Delete Qdrant points by `chunk_ids` in payload |
-| `notify-due` | Due date approaching | Send email via Resend                          |
+| `event_type` | Trigger              | Worker action                                                                   |
+| ------------ | -------------------- | ------------------------------------------------------------------------------- |
+| `ingest`     | Create               | Normalize → chunk → embed → upsert Qdrant                                       |
+| `reindex`    | Update               | Delete old Qdrant points → re-run ingest                                        |
+| `delete`     | Delete               | Query `chunk_index` by `(source_id, source_kind)` → delete Qdrant points + rows |
+| `notify-due` | Due date approaching | Send email via Resend                                                           |
 
 Failed events retry with exponential backoff up to 5 attempts, then marked `failed`.
 
