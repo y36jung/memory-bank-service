@@ -1,0 +1,81 @@
+import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import { Readable } from 'node:stream';
+import { env } from '../config/env.js';
+import { AppError } from '../lib/errors.js';
+
+const s3 = new S3Client({
+  region: env.AWS_REGION,
+  credentials: {
+    accessKeyId: env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+/**
+ * Stream an object to S3 using multipart upload. The Upload class from @aws-sdk/lib-storage
+ * performs true streaming multipart upload without materialising the body in memory.
+ *
+ * @param key         S3 object key
+ * @param stream      Readable stream of the file content
+ * @param contentType MIME type
+ */
+export async function uploadStream(
+  key: string,
+  stream: Readable,
+  contentType: string,
+): Promise<void> {
+  const upload = new Upload({
+    client: s3,
+    params: { Bucket: env.S3_BUCKET_NAME, Key: key, Body: stream, ContentType: contentType },
+  });
+  await upload.done();
+}
+
+/**
+ * Return a Readable stream for an S3 object.
+ * Throws AppError('S3_NOT_FOUND', ..., 404) if the key does not exist.
+ */
+export async function getStream(key: string): Promise<Readable> {
+  try {
+    const response = await s3.send(
+      new GetObjectCommand({
+        Bucket: env.S3_BUCKET_NAME,
+        Key: key,
+      }),
+    );
+
+    if (!(response.Body instanceof Readable)) {
+      // In Node.js the AWS SDK v3 returns an IncomingMessage/Readable for GetObject.
+      // Cast via the sdk's transformToWebStream or directly if already Readable.
+      const body = response.Body;
+      if (body == null) {
+        throw new AppError('S3_NOT_FOUND', 'Object not found', 404);
+      }
+      // body is a SdkStream which is Readable-compatible in Node; cast it.
+      return body as unknown as Readable;
+    }
+
+    return response.Body;
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    // AWS SDK throws a shaped error with a $metadata.httpStatusCode or a name property.
+    const name = (err as { name?: string }).name ?? '';
+    if (name === 'NoSuchKey' || name === 'NotFound') {
+      throw new AppError('S3_NOT_FOUND', 'Object not found', 404);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Delete an S3 object. Idempotent — S3 delete of a non-existent key is a no-op.
+ */
+export async function deleteObject(key: string): Promise<void> {
+  await s3.send(
+    new DeleteObjectCommand({
+      Bucket: env.S3_BUCKET_NAME,
+      Key: key,
+    }),
+  );
+}
