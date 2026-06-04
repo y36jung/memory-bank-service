@@ -5,5 +5,6 @@ export default defineConfig({
     include: ['tests/unit/**/*.test.ts'],
     exclude: ['tests/integration/**', 'tests/e2e/**'],
     passWithNoTests: true,
+    setupFiles: ['tests/unit/setup.ts'],
   },
 });
