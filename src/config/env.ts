@@ -19,6 +19,11 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
+  MAX_FILE_SIZE_BYTES: z.coerce.number().default(524_288_000),
+  MEDIA_EXTRACT_TIMEOUT_MS: z.coerce.number().default(600_000),
+  VISION_TIMEOUT_MS: z.coerce.number().default(60_000),
+  WHISPER_TIMEOUT_MS: z.coerce.number().default(120_000),
+  FFMPEG_PATH: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

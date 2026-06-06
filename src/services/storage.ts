@@ -1,4 +1,10 @@
-import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { Readable } from 'node:stream';
 import { env } from '../config/env.js';
@@ -78,4 +84,57 @@ export async function deleteObject(key: string): Promise<void> {
       Key: key,
     }),
   );
+}
+
+/**
+ * Returns the ContentLength of an S3 object in bytes, or null if the key does not exist.
+ */
+export async function headObject(key: string): Promise<number | null> {
+  try {
+    const response = await s3.send(new HeadObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key: key }));
+    return response.ContentLength ?? null;
+  } catch (err) {
+    const name = (err as { name?: string }).name ?? '';
+    if (name === 'NoSuchKey' || name === 'NotFound' || name === '404') return null;
+    throw err;
+  }
+}
+
+/**
+ * Writes a Buffer or string to S3. Used for sidecar cache files.
+ */
+export async function putObject(
+  key: string,
+  body: Buffer | string,
+  contentType: string,
+): Promise<void> {
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: env.S3_BUCKET_NAME,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  );
+}
+
+/**
+ * Downloads an S3 object and returns it as a Buffer.
+ * Returns null if the key does not exist (NoSuchKey / NotFound).
+ */
+export async function getObjectBuffer(key: string): Promise<Buffer | null> {
+  try {
+    const response = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key: key }));
+    if (!response.Body) return null;
+    const stream = response.Body as unknown as import('node:stream').Readable;
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as ArrayBuffer));
+    }
+    return Buffer.concat(chunks);
+  } catch (err) {
+    const name = (err as { name?: string }).name ?? '';
+    if (name === 'NoSuchKey' || name === 'NotFound' || name === '404') return null;
+    throw err;
+  }
 }
