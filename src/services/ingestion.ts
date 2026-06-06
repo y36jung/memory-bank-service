@@ -4,6 +4,7 @@ import { eq, and, lt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { documents, chunks, ingestionJobs } from '../db/schema.js';
 import { extractText } from './extractor/index.js';
+import { env } from '../config/env.js';
 import { chunkText } from './chunker.js';
 import { batchEmbed } from './embeddings.js';
 import { upsertPoints, deletePoints } from './qdrant.js';
@@ -11,6 +12,12 @@ import { generateQdrantId } from '../lib/idgen.js';
 import { withTimeout } from '../lib/utils.js';
 import { ingestionQueue } from '../queue/index.js';
 import type { IngestionJobPayload } from '../queue/index.js';
+
+function isMediaMimeType(mimeType: string): boolean {
+  return (
+    mimeType.startsWith('image/') || mimeType.startsWith('audio/') || mimeType.startsWith('video/')
+  );
+}
 
 export async function processIngestionJob(job: Job<IngestionJobPayload>): Promise<void> {
   const { documentId, storageKey } = job.data;
@@ -61,8 +68,25 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
     await deletePoints(existingChunkRows.map((c) => c.qdrantId));
   }
 
-  // Step 3 EXTRACT (60s timeout).
-  const text = await withTimeout(extractText(storageKey, doc.mimeType), 60_000, 'extract');
+  // Step 3 EXTRACT — dynamic timeout for media types; progress written to documents.metadata.
+  const extractTimeout = isMediaMimeType(doc.mimeType) ? env.MEDIA_EXTRACT_TIMEOUT_MS : 60_000;
+
+  const onProgress = isMediaMimeType(doc.mimeType)
+    ? async (stage: string, pct: number): Promise<void> => {
+        await db
+          .update(documents)
+          .set({ metadata: { stage, progress: pct }, updatedAt: new Date() })
+          .where(eq(documents.id, documentId));
+      }
+    : undefined;
+
+  const text = await withTimeout(
+    onProgress
+      ? extractText(storageKey, doc.mimeType, { onProgress })
+      : extractText(storageKey, doc.mimeType),
+    extractTimeout,
+    'extract',
+  );
 
   // Step 4 CHUNK (synchronous — no timeout per PLAN.md).
   const produced = chunkText(text);

@@ -25,11 +25,31 @@ import { extractSpreadsheet } from '../../../src/services/extractor/spreadsheet.
 
 vi.mock('../../../src/services/storage.js', () => ({
   getStream: vi.fn(),
+  headObject: vi.fn(),
+  getObjectBuffer: vi.fn(),
+  putObject: vi.fn(),
   uploadStream: vi.fn(),
   deleteObject: vi.fn(),
 }));
 
+// Mock file-type so MIME detection returns undefined by default (falls back to client type)
+vi.mock('file-type', () => ({
+  fileTypeFromBuffer: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock M2 sub-extractors so extractText dispatch tests don't hit real OpenAI/ffmpeg
+vi.mock('../../../src/services/extractor/image.js', () => ({
+  extractImage: vi.fn().mockResolvedValue('image description'),
+}));
+vi.mock('../../../src/services/extractor/audio.js', () => ({
+  extractAudio: vi.fn().mockResolvedValue('audio transcript'),
+}));
+vi.mock('../../../src/services/extractor/video.js', () => ({
+  extractVideo: vi.fn().mockResolvedValue('video text'),
+}));
+
 import * as storage from '../../../src/services/storage.js';
+import { fileTypeFromBuffer } from 'file-type';
 import { extractText } from '../../../src/services/extractor/index.js';
 
 // ---------------------------------------------------------------------------
@@ -194,11 +214,18 @@ describe('extractSpreadsheet', () => {
 describe('extractText — MIME type dispatch', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // M2: headObject now called first; return null so size pre-check is skipped
+    vi.mocked(storage.headObject).mockResolvedValue(null);
+    // M2: fileTypeFromBuffer defaults to undefined so client MIME is used as fallback
+    vi.mocked(fileTypeFromBuffer).mockResolvedValue(undefined);
   });
 
   it('handles text/plain by returning the stream content as UTF-8', async () => {
     const expected = 'Hello, world!';
-    vi.mocked(storage.getStream).mockResolvedValue(stringToReadable(expected));
+    // First call: header detection stream; second call: content stream
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(stringToReadable(expected))
+      .mockResolvedValueOnce(stringToReadable(expected));
 
     const result = await extractText('some/key.txt', 'text/plain');
     expect(result).toBe(expected);
@@ -206,7 +233,9 @@ describe('extractText — MIME type dispatch', () => {
 
   it('handles text/markdown by returning the stream content as UTF-8', async () => {
     const expected = '# Heading\n\nSome paragraph.';
-    vi.mocked(storage.getStream).mockResolvedValue(stringToReadable(expected));
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(stringToReadable(expected))
+      .mockResolvedValueOnce(stringToReadable(expected));
 
     const result = await extractText('some/key.md', 'text/markdown');
     expect(result).toBe(expected);
@@ -214,26 +243,26 @@ describe('extractText — MIME type dispatch', () => {
 
   it('handles text/plain with charset parameter (strips MIME params)', async () => {
     const expected = 'plain text with charset';
-    vi.mocked(storage.getStream).mockResolvedValue(stringToReadable(expected));
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(stringToReadable(expected))
+      .mockResolvedValueOnce(stringToReadable(expected));
 
     const result = await extractText('some/key.txt', 'text/plain; charset=utf-8');
     expect(result).toBe(expected);
   });
 
   it('handles application/pdf by parsing the buffer', async () => {
-    // We cannot easily create a PDF in-memory without a heavy tool, so we verify
-    // that the dispatch reaches the PDF branch by providing a minimal stub.
-    // A real PDF test would require an actual PDF buffer. Instead, we verify
-    // that an invalid PDF throws (PDF branch was reached, not "unsupported").
+    // Verify dispatch reaches the PDF branch — an invalid PDF throws a non-UNSUPPORTED_FORMAT error
     const invalidPdfBuffer = Buffer.from('not a pdf');
-    vi.mocked(storage.getStream).mockResolvedValue(bufferToReadable(invalidPdfBuffer));
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(bufferToReadable(invalidPdfBuffer))
+      .mockResolvedValueOnce(bufferToReadable(invalidPdfBuffer));
 
-    // The PDF extractor will throw an error about invalid PDF format,
-    // NOT an AppError('UNSUPPORTED_FORMAT'). This proves the PDF branch was reached.
     await expect(extractText('some/key.pdf', 'application/pdf')).rejects.toThrow();
-    // If it threw AppError UNSUPPORTED_FORMAT, the dispatch was wrong.
     try {
-      vi.mocked(storage.getStream).mockResolvedValue(bufferToReadable(invalidPdfBuffer));
+      vi.mocked(storage.getStream)
+        .mockResolvedValueOnce(bufferToReadable(invalidPdfBuffer))
+        .mockResolvedValueOnce(bufferToReadable(invalidPdfBuffer));
       await extractText('some/key.pdf', 'application/pdf');
     } catch (err) {
       if (err instanceof AppError) {
@@ -248,7 +277,9 @@ describe('extractText — MIME type dispatch', () => {
       'node_modules/mammoth/test/test-data/single-paragraph.docx',
     );
     const buffer = fs.readFileSync(fixturePath);
-    vi.mocked(storage.getStream).mockResolvedValue(bufferToReadable(buffer));
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(bufferToReadable(buffer))
+      .mockResolvedValueOnce(bufferToReadable(buffer));
 
     const result = await extractText(
       'some/key.docx',
@@ -261,7 +292,9 @@ describe('extractText — MIME type dispatch', () => {
 
   it('handles text/csv by converting to TSV', async () => {
     const csv = 'a,b\n1,2\n';
-    vi.mocked(storage.getStream).mockResolvedValue(bufferToReadable(Buffer.from(csv)));
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(bufferToReadable(Buffer.from(csv)))
+      .mockResolvedValueOnce(bufferToReadable(Buffer.from(csv)));
 
     const result = await extractText('some/key.csv', 'text/csv');
     expect(result).toContain('a\tb');
@@ -278,7 +311,9 @@ describe('extractText — MIME type dispatch', () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 
-    vi.mocked(storage.getStream).mockResolvedValue(bufferToReadable(buf));
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(bufferToReadable(buf))
+      .mockResolvedValueOnce(bufferToReadable(buf));
 
     const result = await extractText(
       'some/key.xlsx',
@@ -289,42 +324,40 @@ describe('extractText — MIME type dispatch', () => {
   });
 
   it('throws AppError("UNSUPPORTED_FORMAT") for unknown MIME type', async () => {
-    vi.mocked(storage.getStream).mockResolvedValue(stringToReadable('anything'));
+    // extractText calls getStream twice: once for header detection, once for content dispatch
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(stringToReadable('anything'))
+      .mockResolvedValueOnce(stringToReadable('anything'));
 
-    await expect(extractText('some/key.bin', 'application/octet-stream')).rejects.toThrow(AppError);
-
+    let caught: unknown;
     try {
-      vi.mocked(storage.getStream).mockResolvedValue(stringToReadable('anything'));
       await extractText('some/key.bin', 'application/octet-stream');
     } catch (err) {
-      expect(err).toBeInstanceOf(AppError);
-      expect((err as AppError).code).toBe('UNSUPPORTED_FORMAT');
+      caught = err;
     }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe('UNSUPPORTED_FORMAT');
   });
 
-  it('throws AppError("UNSUPPORTED_FORMAT") for image/jpeg (Milestone 2 scope)', async () => {
-    vi.mocked(storage.getStream).mockResolvedValue(stringToReadable('image data'));
-
-    let caughtError: unknown;
-    try {
-      await extractText('photo.jpg', 'image/jpeg');
-    } catch (err) {
-      caughtError = err;
-    }
-    expect(caughtError).toBeInstanceOf(AppError);
-    expect((caughtError as AppError).code).toBe('UNSUPPORTED_FORMAT');
+  // M2: image/jpeg now routes to extractImage — NOT UNSUPPORTED_FORMAT
+  it('routes image/jpeg to extractImage (Milestone 2)', async () => {
+    vi.mocked(storage.getStream).mockResolvedValueOnce(stringToReadable('image data'));
+    const { extractImage } = await import('../../../src/services/extractor/image.js');
+    // Re-set mock return value after vi.resetAllMocks() cleared it
+    vi.mocked(extractImage).mockResolvedValue('image description');
+    const result = await extractText('photo.jpg', 'image/jpeg');
+    expect(extractImage).toHaveBeenCalled();
+    expect(result).toBe('image description');
   });
 
-  it('throws AppError("UNSUPPORTED_FORMAT") for audio/mpeg (Milestone 2 scope)', async () => {
-    vi.mocked(storage.getStream).mockResolvedValue(stringToReadable('audio data'));
-
-    let caughtError: unknown;
-    try {
-      await extractText('audio.mp3', 'audio/mpeg');
-    } catch (err) {
-      caughtError = err;
-    }
-    expect(caughtError).toBeInstanceOf(AppError);
-    expect((caughtError as AppError).code).toBe('UNSUPPORTED_FORMAT');
+  // M2: audio/mpeg now routes to extractAudio — NOT UNSUPPORTED_FORMAT
+  it('routes audio/mpeg to extractAudio (Milestone 2)', async () => {
+    vi.mocked(storage.getStream).mockResolvedValueOnce(stringToReadable('audio data'));
+    const { extractAudio } = await import('../../../src/services/extractor/audio.js');
+    // Re-set mock return value after vi.resetAllMocks() cleared it
+    vi.mocked(extractAudio).mockResolvedValue('audio transcript');
+    const result = await extractText('audio.mp3', 'audio/mpeg');
+    expect(extractAudio).toHaveBeenCalled();
+    expect(result).toBe('audio transcript');
   });
 });
