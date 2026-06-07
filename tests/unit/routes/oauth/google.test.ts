@@ -162,6 +162,8 @@ describe('GET /api/oauth/google/status', () => {
       refreshToken: 'refresh',
       expiresAt: new Date(Date.now() + 3600_000),
       lastSyncedAt: null,
+      scope:
+        'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly',
     });
     const response = await app.inject({
       method: 'GET',
@@ -194,6 +196,8 @@ describe('POST /api/oauth/google/sync', () => {
       refreshToken: 'refresh',
       expiresAt: new Date(Date.now() + 3600_000),
       lastSyncedAt: null,
+      scope:
+        'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly',
     });
     const response = await app.inject({
       method: 'POST',
@@ -226,6 +230,8 @@ describe('DELETE /api/oauth/google/revoke', () => {
       refreshToken: 'refresh',
       expiresAt: new Date(Date.now() + 3600_000),
       lastSyncedAt: null,
+      scope:
+        'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly',
     });
     const response = await app.inject({
       method: 'DELETE',

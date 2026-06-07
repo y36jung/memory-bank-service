@@ -77,8 +77,10 @@ vi.mock('../../../../src/db/index.js', () => ({
 import {
   getGoogleAuthUrl,
   getDecryptedTokens,
+  hasScope,
   refreshAccessTokenIfNeeded,
 } from '../../../../src/services/oauth/google.js';
+import { encryptTokens } from '../../../../src/services/oauth/token.js';
 import { db } from '../../../../src/db/index.js';
 
 describe('getGoogleAuthUrl', () => {
@@ -112,6 +114,63 @@ describe('getDecryptedTokens', () => {
     await expect(getDecryptedTokens()).rejects.toMatchObject({
       code: 'NOT_CONNECTED',
     });
+  });
+
+  it('returns scope from the DB row', async () => {
+    const { accessToken: encAccess } = encryptTokens('raw-access', null);
+    const mockScope = 'https://www.googleapis.com/auth/gmail.readonly';
+    const mockSelect = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([
+            {
+              id: 'row-id',
+              accessToken: encAccess,
+              refreshToken: null,
+              expiresAt: null,
+              lastSyncedAt: null,
+              scope: mockScope,
+            },
+          ]),
+        }),
+      }),
+    });
+    vi.mocked(db.select).mockImplementation(mockSelect);
+
+    const result = await getDecryptedTokens();
+    expect(result.scope).toBe(mockScope);
+  });
+});
+
+describe('hasScope', () => {
+  it('returns true when the scope string contains the required scope', () => {
+    const granted =
+      'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly';
+    expect(hasScope(granted, 'https://www.googleapis.com/auth/gmail.readonly')).toBe(true);
+  });
+
+  it('returns true for drive scope when both scopes are granted', () => {
+    const granted =
+      'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly';
+    expect(hasScope(granted, 'https://www.googleapis.com/auth/drive.readonly')).toBe(true);
+  });
+
+  it('returns false when the required scope is absent from the granted string', () => {
+    const granted = 'https://www.googleapis.com/auth/gmail.readonly';
+    expect(hasScope(granted, 'https://www.googleapis.com/auth/drive.readonly')).toBe(false);
+  });
+
+  it('returns false when grantedScopeStr is null', () => {
+    expect(hasScope(null, 'https://www.googleapis.com/auth/gmail.readonly')).toBe(false);
+  });
+
+  it('returns false when grantedScopeStr is an empty string', () => {
+    expect(hasScope('', 'https://www.googleapis.com/auth/gmail.readonly')).toBe(false);
+  });
+
+  it('does not do a substring match — partial scope names return false', () => {
+    const granted = 'https://www.googleapis.com/auth/gmail.readonly';
+    expect(hasScope(granted, 'gmail.readonly')).toBe(false);
   });
 });
 

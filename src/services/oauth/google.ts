@@ -66,6 +66,7 @@ export async function getDecryptedTokens(): Promise<{
   refreshToken: string | null;
   expiresAt: Date | null;
   lastSyncedAt: Date | null;
+  scope: string | null;
 }> {
   const rows = await db
     .select()
@@ -83,7 +84,13 @@ export async function getDecryptedTokens(): Promise<{
     refreshToken,
     expiresAt: row.expiresAt,
     lastSyncedAt: row.lastSyncedAt,
+    scope: row.scope,
   };
+}
+
+export function hasScope(grantedScopeStr: string | null, requiredScope: string): boolean {
+  if (!grantedScopeStr) return false;
+  return grantedScopeStr.split(' ').includes(requiredScope);
 }
 
 export async function refreshAccessTokenIfNeeded(tokenRow: {
