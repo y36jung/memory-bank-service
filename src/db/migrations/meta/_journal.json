@@ -8,6 +8,13 @@
       "when": 1779946143490,
       "tag": "0000_fast_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780805145696,
+      "tag": "0001_loving_proemial_gods",
+      "breakpoints": true
     }
   ]
 }

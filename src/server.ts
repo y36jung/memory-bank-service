@@ -7,6 +7,7 @@ import { documentUploadRoutes } from './routes/documents/upload.js';
 import { documentListRoutes } from './routes/documents/list.js';
 import { chatSessionRoutes } from './routes/chat/sessions.js';
 import { chatMessageRoutes } from './routes/chat/messages.js';
+import { googleOAuthRoutes } from './routes/oauth/google.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -20,6 +21,7 @@ export async function buildApp() {
   await app.register(documentListRoutes, { prefix: '/api' });
   await app.register(chatSessionRoutes, { prefix: '/api' });
   await app.register(chatMessageRoutes, { prefix: '/api' });
+  await app.register(googleOAuthRoutes, { prefix: '/api' });
 
   return app;
 }
@@ -39,6 +41,9 @@ export async function start() {
   // Side-effect: starts the BullMQ worker.
   await import('./queue/workers/ingestion.worker.js');
   console.log('Ingestion worker started');
+
+  await import('./queue/workers/oauth-sync.worker.js');
+  console.log('OAuth sync worker started');
 
   const app = await buildApp();
 

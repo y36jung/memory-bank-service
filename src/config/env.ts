@@ -17,6 +17,11 @@ const envSchema = z.object({
   // OAuth vars are optional in M1 (M3-4)
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  OAUTH_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/)
+    .optional(),
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MAX_FILE_SIZE_BYTES: z.coerce.number().default(524_288_000),
