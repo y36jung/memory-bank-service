@@ -21,3 +21,18 @@ export const ingestionQueue = new Queue<IngestionJobPayload>('ingestion', {
     removeOnFail: { age: 60 * 60 * 24 * 30 }, // 30 days
   },
 });
+
+export interface OAuthSyncJobPayload {
+  provider: 'google';
+  gmailQuery?: string;
+}
+
+export const oauthSyncQueue = new Queue<OAuthSyncJobPayload>('oauth-sync', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 10_000 },
+    removeOnComplete: { age: 60 * 60 * 24 * 7 },
+    removeOnFail: { age: 60 * 60 * 24 * 30 },
+  },
+});

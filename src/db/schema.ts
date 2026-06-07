@@ -25,6 +25,8 @@ export const jobStatusEnum = pgEnum('job_status', ['queued', 'running', 'done', 
 
 export const roleEnum = pgEnum('role', ['user', 'assistant']);
 
+export const providerEnum = pgEnum('provider', ['google', 'microsoft']);
+
 // ─── Tables ────────────────────────────────────────────────────────────────────
 
 export const documents = pgTable('documents', {
@@ -86,6 +88,18 @@ export const messages = pgTable('messages', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+export const oauthTokens = pgTable('oauth_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  provider: providerEnum('provider').notNull().unique(),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token'),
+  expiresAt: timestamp('expires_at'),
+  scope: text('scope'),
+  lastSyncedAt: timestamp('last_synced_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ─── Inferred types ────────────────────────────────────────────────────────────
 
 export type Document = typeof documents.$inferSelect;
@@ -96,3 +110,5 @@ export type IngestionJob = typeof ingestionJobs.$inferSelect;
 export type NewIngestionJob = typeof ingestionJobs.$inferInsert;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type Message = typeof messages.$inferSelect;
+export type OAuthToken = typeof oauthTokens.$inferSelect;
+export type NewOAuthToken = typeof oauthTokens.$inferInsert;
