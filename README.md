@@ -2,6 +2,40 @@
 
 A RAG backend that lets you chat with your personal knowledge base — uploaded documents, emails, and cloud files.
 
+## 🤔 Problems
+
+### 1. Siloed knowledge base
+
+Personal knowledge is scattered across physical notes, local files, email inboxes, and cloud storage. There is no unified way to search across all of it, and keyword search fails to surface contextually relevant information when you don't know the exact words used.
+
+### 2. Document organisation
+
+Organising documents, dates, reminders manually are too much of a hassle from time to time, especially when piled with work. For environments with an AI-first mindset, pace of work will be faster than before. In order to keep up with this pace, more cognitive resources should be allocated to work that "actually matters".
+
+### 3. Flawed human memory
+
+People forget. More so when we are forced to memorize larger amounts of information, and retrieve them at appropriate settings. Similarly to the point above, we want to deallocate these resources and delegate them to some "secondary storage".
+
+## 💡 Solution
+
+Create a memory dump that acts as a "second brain". This storage should act as a centralized platform of personal knowledge, where all sources of knowledge such as notes, reminders, emails, documents, etc. can be stored conveniently.
+
+Upon ingestion, automated flows should run to properly organise bits of information based on like knowledge topics. Users have the option to query stored information via a conversation.
+
+## 🎯 Technical Solution
+
+Build a RAG backend that ingests content from every personal knowledge source — file uploads, Gmail, Google Drive, Outlook, and OneDrive — indexes it, and answers natural-language questions with cited sources.
+
+## 📋 Product Specifications
+
+| #   | Requirement                                                                              | Acceptance Criteria                                                                    |
+| --- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 1   | Users can ingest information via typed input or drag-and-drop file upload                | Supported file types are accepted; unsupported types are rejected with a clear error   |
+| 2   | The service automatically organises ingested content into coherent knowledge topics      | Chunks are embedded and retrievable by semantic similarity without manual tagging      |
+| 3   | The chatbot returns accurate, source-cited answers grounded in the user's knowledge base | Responses include citations; the model declines to answer when context is insufficient |
+
+> Metrics TBD — define precision/recall targets and upload success-rate thresholds before M1 sign-off.
+
 ## 📖 Description
 
 Memory Bank ingests content from multiple sources (file uploads, Gmail, Google Drive), chunks and embeds it using OpenAI, and answers natural-language questions with GPT-4o over a streaming SSE response. Postgres is the single source of truth for all content; Qdrant serves as the vector index and is fully rebuildable at any time.
