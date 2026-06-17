@@ -1,0 +1,137 @@
+[
+  {
+    "id": "tc-01",
+    "group": 1,
+    "tags": ["single-chunk", "factual", "rest-api"],
+    "question": "What does it mean for a REST API to be stateless?",
+    "fixture_docs": ["rest_api_guide.md"],
+    "ground_truth": null,
+    "notes": "Single-chunk factual lookup. Answer should be fully contained within one chunk of rest_api_guide.md covering the Statelessness constraint."
+  },
+  {
+    "id": "tc-02",
+    "group": 1,
+    "tags": ["multi-chunk", "synthesis", "rest-api"],
+    "question": "Summarize the six architectural constraints that define a REST API.",
+    "fixture_docs": ["rest_api_guide.md"],
+    "ground_truth": null,
+    "notes": "Multi-chunk synthesis. Answer requires combining information from multiple chunks covering the six REST constraints."
+  },
+  {
+    "id": "tc-03",
+    "group": 1,
+    "tags": ["knowledge-bleed", "finance"],
+    "question": "What is compound interest and how is it calculated?",
+    "fixture_docs": ["finance_basics.md"],
+    "ground_truth": null,
+    "notes": "Implicit knowledge bleed test. finance_basics.md describes compound interest without giving a formula. GPT-4o may hallucinate the A=P(1+r/n)^nt formula from training data. Faithfulness should be <0.70."
+  },
+  {
+    "id": "tc-04",
+    "group": 1,
+    "tags": ["partial-info", "nutrition"],
+    "question": "How much protein should a sedentary adult consume per day?",
+    "fixture_docs": ["nutrition_guide.md"],
+    "ground_truth": null,
+    "notes": "Partial information test. nutrition_guide.md gives active-adult RDA (1.4-2.2 g/kg) but explicitly states sedentary adult guidance is not provided. Model should acknowledge the gap rather than fill it in."
+  },
+  {
+    "id": "tc-05",
+    "group": 1,
+    "tags": ["conflict", "finance"],
+    "question": "How many months of expenses should an emergency fund cover?",
+    "fixture_docs": ["finance_basics.md", "finance_advanced.md"],
+    "ground_truth": null,
+    "notes": "Conflicting documents test. finance_basics.md says 3 months; finance_advanced.md says 6 months. Model should surface the conflict or hedge. Faithfulness expected 0.50-0.80."
+  },
+  {
+    "id": "tc-06",
+    "group": 1,
+    "tags": ["high-overlap", "rest-api"],
+    "question": "What is the purpose of the uniform interface constraint in REST?",
+    "fixture_docs": ["rest_api_guide.md"],
+    "ground_truth": null,
+    "notes": "High-overlap chunks test. The Uniform Interface section straddles a chunk boundary so two adjacent chunks both score above 0.5. Model should synthesize rather than repeat."
+  },
+  {
+    "id": "tc-07",
+    "group": 2,
+    "tags": ["cross-doc", "same-format", "investment"],
+    "question": "How does dollar-cost averaging help a retirement investor reduce risk?",
+    "fixture_docs": ["investment_basics.md", "retirement_planning.md"],
+    "ground_truth": "Dollar-cost averaging (DCA) is an investment strategy where a fixed amount is invested at regular intervals regardless of price. For retirement investors this reduces the impact of market volatility: buying more units when prices are low and fewer when prices are high smooths the average cost basis over time, lowering the risk of making a large investment at a market peak.",
+    "notes": "Cross-document synthesis, same format. Answer requires combining DCA mechanics from investment_basics.md with retirement context from retirement_planning.md."
+  },
+  {
+    "id": "tc-08",
+    "group": 2,
+    "tags": ["cross-doc", "mixed-format", "nutrition", "travel"],
+    "question": "What high-protein foods are suitable to pack for long-haul travel to Japan?",
+    "fixture_docs": ["nutrition_guide.md", "world_destinations.csv"],
+    "ground_truth": "High-protein travel-friendly foods include jerky, nuts, protein bars, and hard-boiled eggs. Japan does not restrict most food imports from Canada, but raw meats and fresh produce are prohibited. Pre-packaged, shelf-stable high-protein snacks such as jerky and protein bars are suitable for carry-on.",
+    "notes": "Cross-document mixed-format synthesis. Combines protein food list from nutrition_guide.md with Japan import restrictions from world_destinations.csv."
+  },
+  {
+    "id": "tc-09",
+    "group": 2,
+    "tags": ["structured-data", "csv", "travel"],
+    "question": "What is the visa requirement for a Canadian citizen travelling to Japan?",
+    "fixture_docs": ["world_destinations.csv"],
+    "ground_truth": "Canadian citizens do not require a visa to visit Japan for stays of up to 90 days.",
+    "notes": "Structured data query from CSV. Tests whether the CSV extractor correctly surfaces the Japan row and the model can answer precisely."
+  },
+  {
+    "id": "tc-10",
+    "group": 2,
+    "tags": ["vocab-mismatch", "rest-api"],
+    "question": "Is a REST API connectionless between requests?",
+    "fixture_docs": ["rest_api_guide.md"],
+    "ground_truth": "REST APIs are stateless, not specifically 'connectionless' in the protocol sense. Each request must contain all information needed to process it; the server retains no session state between calls. The underlying HTTP/1.1 connection may persist (keep-alive), but from the REST perspective each request is independent.",
+    "notes": "Vocabulary mismatch test. Query uses 'connectionless'; the document uses 'stateless'. The Statelessness section of rest_api_guide.md includes a clarifying paragraph on stateless vs connectionless."
+  },
+  {
+    "id": "tc-11",
+    "group": 2,
+    "tags": ["topk-saturation", "rest-api"],
+    "question": "What HTTP methods are explicitly listed as unsafe in the REST API guide?",
+    "fixture_docs": ["rest_api_guide.md"],
+    "ground_truth": "POST, PUT, PATCH, and DELETE are unsafe HTTP methods because they modify server state. The REST API guide lists these methods in the context of HTTP semantics and idempotency.",
+    "notes": "Top-k saturation test. The HTTP Methods section is placed late in rest_api_guide.md so the target chunk ranks 11th or later in Qdrant at topK=10. ContextPrecision and ContextRecall expected <0.30."
+  },
+  {
+    "id": "tc-12",
+    "group": 2,
+    "tags": ["rare-fact", "nutrition"],
+    "question": "What is the recommended daily intake of selenium for adult women according to the nutrition guide?",
+    "fixture_docs": ["nutrition_guide.md"],
+    "ground_truth": "The recommended daily intake of selenium for adult women is 55 micrograms per day, according to the nutrition guide.",
+    "notes": "Rare/specific fact test. The selenium RDA (55 mcg/day) is buried mid-chunk in a long minerals section of nutrition_guide.md."
+  },
+  {
+    "id": "tc-13",
+    "group": 2,
+    "tags": ["chunk-boundary", "investment"],
+    "question": "What are the tax advantages of contributing to an RRSP?",
+    "fixture_docs": ["retirement_planning.md"],
+    "ground_truth": "RRSP contributions reduce your taxable income in the year of contribution. Investment growth inside an RRSP is tax-deferred until withdrawal. Withdrawals are taxed as income, ideally at retirement when marginal rates are lower.",
+    "notes": "Chunk boundary test. The three RRSP tax advantage facts straddle two consecutive chunks with 150-token overlap. Tests whether the retriever surfaces enough context to answer completely."
+  },
+  {
+    "id": "tc-18",
+    "group": 2,
+    "tags": ["out-of-scope", "negative"],
+    "question": "What is the current stock price of Apple Inc.?",
+    "fixture_docs": [],
+    "ground_truth": "I don't know based on the provided documents.",
+    "notes": "Out-of-scope query. No indexed document contains Apple stock price data. Model should say it doesn't know rather than hallucinate. Faithfulness expected >0.90."
+  },
+  {
+    "id": "tc-19",
+    "group": 2,
+    "tags": ["re-index", "idempotency", "rest-api"],
+    "question": "What is the layered system constraint in REST?",
+    "fixture_docs": ["rest_api_guide.md"],
+    "ground_truth": "The layered system constraint means a client cannot tell whether it is connected directly to the end server or an intermediary such as a load balancer, CDN, or gateway. Each layer only sees the adjacent layer, enabling scalability and security through transparent proxies.",
+    "notes": "Re-index idempotency test. Run eval before and after deleting and re-uploading rest_api_guide.md. Scores should be identical within ±0.05."
+  }
+]
