@@ -116,3 +116,99 @@ npm run typecheck # TypeScript type checking
 npm run lint      # ESLint
 npm run format    # Prettier
 ```
+
+## 📊 RAG Evaluation (RAGAS)
+
+`scripts/eval/` contains a Python-based evaluation harness that measures RAG quality using [RAGAS](https://docs.ragas.io/). It calls the live Memory Bank API, fetches retrieved chunk text from Postgres, and runs RAGAS metrics across 15 test cases covering single-chunk lookup, cross-document synthesis, CSV structured queries, vocabulary mismatch, top-k saturation, and more.
+
+### Metrics
+
+| Group                 | Test cases    | Metrics                                                       |
+| --------------------- | ------------- | ------------------------------------------------------------- |
+| 1 — no ground truth   | tc-01 → tc-06 | `faithfulness`, `answer_relevancy`                            |
+| 2 — with ground truth | tc-07 → tc-19 | + `context_precision`, `context_recall`, `answer_correctness` |
+
+### Prerequisites
+
+- Memory Bank server running (`npm start`)
+- Docker Compose services running (`docker compose up -d`)
+- Python 3.10+
+- `OPENAI_API_KEY` in `.env`
+
+### 1. Set up Python environment
+
+```bash
+python3 -m venv scripts/eval/.venv
+source scripts/eval/.venv/bin/activate   # Windows: scripts\eval\.venv\Scripts\activate
+pip install -r scripts/eval/requirements.txt
+python scripts/eval/setup_shim.py
+```
+
+> **Note:** `setup_shim.py` adds a one-line compatibility stub for `langchain_community.chat_models.vertexai`, which RAGAS imports unconditionally but `langchain` v1.x removed. This must be run once after every fresh `pip install`.
+
+### 2. Upload fixture documents
+
+Upload the synthetic fixture documents and wait for indexing to complete:
+
+```bash
+for f in scripts/eval/fixtures/*; do
+  curl -s -X POST http://localhost:3000/api/documents/upload -F "file=@$f" | jq .
+done
+
+# Poll until all documents show "status": "indexed"
+curl -s http://localhost:3000/api/documents | jq '[.data[] | {name:.originalName, status:.status}]'
+```
+
+### 3. Run the full eval suite
+
+```bash
+python scripts/eval/eval.py \
+  --db-url "postgresql://memory_bank:dev-password@localhost:5432/memory_bank_service_db"
+```
+
+Results are printed as a colour-coded table and saved to `eval_results_{timestamp}.json`.
+
+### 4. Filter by tag for faster iteration
+
+```bash
+# Quick smoke test — single-chunk and factual cases only
+python scripts/eval/eval.py --tags single-chunk factual
+
+# Cross-document synthesis cases
+python scripts/eval/eval.py --tags cross-doc
+
+# Retrieval edge cases
+python scripts/eval/eval.py --tags topk-saturation vocab-mismatch chunk-boundary
+```
+
+### 5. Verify re-index idempotency (tc-19)
+
+```bash
+python scripts/eval/eval.py --tags re-index --output before_reindex.json
+
+# Delete and re-upload rest_api_guide.md, then wait for re-indexing...
+
+python scripts/eval/eval.py --tags re-index --output after_reindex.json
+
+python3 -c "
+import json
+b = json.load(open('before_reindex.json'))['results'][0]['metrics']
+a = json.load(open('after_reindex.json'))['results'][0]['metrics']
+for k in b: print(f'{k}: {b[k]:.3f} -> {a[k]:.3f}  diff={abs(b[k]-a[k]):.3f}')
+"
+```
+
+Scores should be identical within ±0.05 across runs.
+
+### CLI reference
+
+```
+python scripts/eval/eval.py [options]
+
+Options:
+  --base-url URL    Memory Bank API base URL (default: http://localhost:3000)
+  --db-url URL      Postgres connection string (default: DATABASE_URL env var)
+  --dataset PATH    Path to dataset JSON (default: scripts/eval/dataset.json)
+  --output PATH     Output JSON file (default: eval_results_{timestamp}.json)
+  --tags TAG [...]  Filter test cases by tag (ANY match)
+```

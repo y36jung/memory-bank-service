@@ -1,0 +1,394 @@
+{
+  "run_at": "2026-06-17T00:23:21.996167+00:00",
+  "base_url": "http://localhost:3000",
+  "dataset": "/scripts/eval/dataset.json",
+  "total_cases": 15,
+  "skipped_cases": 0,
+  "results": [
+    {
+      "test_case_id": "tc-01",
+      "question": "What does it mean for a REST API to be stateless?",
+      "answer": "In the context of REST API design, statelessness means that each request from a client to the server must contain all the information needed to understand and process the request. The server does not store any session-specific data between requests. As a result, the server treats each request as an independent transaction, unconnected to any previous request. This principle helps to simplify server design and improve scalability, as each request can be handled separately without requiring the server to remember past interactions. \n\n(Source: api_design_principles.txt)",
+      "contexts": [
+        "API DESIGN PRINCIPLES FOR MODERN BACKEND SERVICES\n=================================================== A well-designed API is the contract between your service and every client that depends on it. Getting it right matters enormously — once published, changing an API is costly. This guide covers the principles and practices that produce APIs that are intuitive, consistent, and maintainable over time. REST FUNDAMENTALS\n----------------- REST (Representational State Transfer) is an architectural style, not a protocol. The six constraints that define a RESTful system are: client-server separation, statelessness, cacheability, uniform interface, layered system, and optional code-on-demand. The uniform interface constraint is where most practical guidance comes from: Resource Identification: Everything is a resource with a unique URI. Use nouns, not verbs. The action is expressed by the HTTP method. Good:   GET /users/42\n  Bad:    GET /getUser?id=42 HTTP Method Semantics:\n  GET     — Read a resource. Must be safe and idempotent. No side effects. POST    — Create a new resource or trigger a non-idempotent action. PUT     — Replace a resource entirely (idempotent). PATCH   — Partially update a resource. DELETE  — Remove a resource (idempotent). Using methods correctly lets HTTP caches, proxies, and clients make safe assumptions about your API's behavior. HTTP STATUS CODES\n----------------- Status codes communicate the outcome of a request. Misusing them — returning 200 with an error body — breaks every HTTP-aware tool in the ecosystem. 2xx — Success\n  200 OK              Standard success for GET, PUT, PATCH\n  201 Created         Resource was created; include Location header with new URI\n  204 No Content      Success with no response body (common for DELETE) 4xx — Client Errors\n  400 Bad Request     Malformed request syntax or invalid parameters\n  401 Unauthorized    Missing or invalid authentication credentials\n  403 Forbidden       Authenticated but not authorized for this resource\n  404 Not Found       Resource does not exist\n  409 Conflict        Request conflicts with current state (e.g., duplicate create)\n  422 Unprocessable   Valid syntax but semantically invalid (validation errors)\n  429 Too Many Req. Rate limit exceeded; include Retry-After header 5xx — Server Errors\n  500 Internal Error  Unexpected server failure\n  502 Bad Gateway     Upstream service failure\n  503 Unavailable     Service overloaded or in maintenance; include Retry-After VERSIONING STRATEGIES\n--------------------- APIs must evolve, but changes that break existing clients are unacceptable without a migration path. Three common approaches: URI Versioning: /v1/users, /v2/users\n  Pros: Explicit, easy to route, visible in logs and browser bookmarks. Cons: Technically violates REST (same resource, different URI), pollutes the URL space. Best for: Public APIs with long-lived clients. Header Versioning: Accept: application/vnd.myapi.v2+json\n  Pros: Clean URLs, semantically correct. Cons: Invisible in browser, harder to test manually. Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself."
+      ],
+      "ground_truth": null,
+      "sources": [
+        {
+          "chunkId": "e1dc3bc6-6d3e-4f74-a264-2122191f27bf",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.43209958
+        }
+      ],
+      "metrics": {
+        "faithfulness": 0.7142857142857143,
+        "answer_relevancy": 0.7790408024011546
+      },
+      "error": null,
+      "duration_ms": 3218
+    },
+    {
+      "test_case_id": "tc-02",
+      "question": "Summarize the six architectural constraints that define a REST API.",
+      "answer": "The six architectural constraints that define a REST API, as mentioned in \"api_design_principles.txt,\" are:\n\n1. **Client-Server Separation**: This constraint ensures the separation of concerns between the client, which handles the user interface, and the server, which manages data and business logic.\n\n2. **Statelessness**: Each request from the client to the server must contain all the information needed to understand and process the request, as the server does not store any session state between requests.\n\n3. **Cacheability**: Responses from the server must be defined as cacheable or non-cacheable, allowing clients and intermediaries to cache responses and improve performance.\n\n4. **Uniform Interface**: This constraint simplifies and decouples the architecture, creating a standard way to communicate with the server. It includes principles like resource identification through URIs, representation of resources, and usage of HTTP methods.\n\n5. **Layered System**: The architecture can be composed of hierarchical layers where each layer has a specific function. This abstraction allows middleware like load balancers to operate without affecting client interactions.\n\n6. **Code on Demand (Optional)**: Servers can optionally send executable code to clients to extend their functionality, though this is not commonly used.",
+      "contexts": [
+        "API DESIGN PRINCIPLES FOR MODERN BACKEND SERVICES\n=================================================== A well-designed API is the contract between your service and every client that depends on it. Getting it right matters enormously — once published, changing an API is costly. This guide covers the principles and practices that produce APIs that are intuitive, consistent, and maintainable over time. REST FUNDAMENTALS\n----------------- REST (Representational State Transfer) is an architectural style, not a protocol. The six constraints that define a RESTful system are: client-server separation, statelessness, cacheability, uniform interface, layered system, and optional code-on-demand. The uniform interface constraint is where most practical guidance comes from: Resource Identification: Everything is a resource with a unique URI. Use nouns, not verbs. The action is expressed by the HTTP method. Good:   GET /users/42\n  Bad:    GET /getUser?id=42 HTTP Method Semantics:\n  GET     — Read a resource. Must be safe and idempotent. No side effects. POST    — Create a new resource or trigger a non-idempotent action. PUT     — Replace a resource entirely (idempotent). PATCH   — Partially update a resource. DELETE  — Remove a resource (idempotent). Using methods correctly lets HTTP caches, proxies, and clients make safe assumptions about your API's behavior. HTTP STATUS CODES\n----------------- Status codes communicate the outcome of a request. Misusing them — returning 200 with an error body — breaks every HTTP-aware tool in the ecosystem. 2xx — Success\n  200 OK              Standard success for GET, PUT, PATCH\n  201 Created         Resource was created; include Location header with new URI\n  204 No Content      Success with no response body (common for DELETE) 4xx — Client Errors\n  400 Bad Request     Malformed request syntax or invalid parameters\n  401 Unauthorized    Missing or invalid authentication credentials\n  403 Forbidden       Authenticated but not authorized for this resource\n  404 Not Found       Resource does not exist\n  409 Conflict        Request conflicts with current state (e.g., duplicate create)\n  422 Unprocessable   Valid syntax but semantically invalid (validation errors)\n  429 Too Many Req. Rate limit exceeded; include Retry-After header 5xx — Server Errors\n  500 Internal Error  Unexpected server failure\n  502 Bad Gateway     Upstream service failure\n  503 Unavailable     Service overloaded or in maintenance; include Retry-After VERSIONING STRATEGIES\n--------------------- APIs must evolve, but changes that break existing clients are unacceptable without a migration path. Three common approaches: URI Versioning: /v1/users, /v2/users\n  Pros: Explicit, easy to route, visible in logs and browser bookmarks. Cons: Technically violates REST (same resource, different URI), pollutes the URL space. Best for: Public APIs with long-lived clients. Header Versioning: Accept: application/vnd.myapi.v2+json\n  Pros: Clean URLs, semantically correct. Cons: Invisible in browser, harder to test manually. Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself.",
+        "Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself. Key JWT security practices:\n- Use short expiry times (15 minutes to 1 hour) with refresh tokens for long sessions\n- Sign with RS256 (asymmetric) for services that only need to verify, not issue tokens\n- Never store sensitive data in JWT payload — it is base64-encoded, not encrypted\n- Validate: signature, expiry (exp), audience (aud), and issuer (iss) API Keys: Simpler than JWT. Suitable for server-to-server communication where a long-lived credential is acceptable. Should be generated cryptographically (UUID v4 or 32 random bytes), stored as a hash, and scoped to specific permissions. OAuth 2.0: The standard for delegated authorization. A user grants your API limited access to their data on another service (e.g., Google Drive). Do not implement OAuth from scratch — use a well-audited library. PAGINATION\n---------- Never return unbounded collections. Three common pagination patterns: Offset Pagination: ?page=3&limit=20\n  Simple to implement and understand. Suffers from the \"page drift\" problem — if items are added or deleted between requests, pages shift and the client may see duplicates or miss items. Cursor Pagination: ?after=eyJpZCI6MjB9&limit=20\n  The cursor is an opaque token (usually base64-encoded ID or timestamp) pointing to a position in the dataset. Stable regardless of inserts or deletes. Required for real-time feeds. More complex to implement. Keyset Pagination: ?after_id=20&limit=20\n  Similar to cursor but the key is visible. Works well on indexed columns; degraded performance on non-indexed columns. Always include metadata in list responses: total count, next/previous cursor or page links. RATE LIMITING\n------------- Protect your API from abuse and ensure fair usage across clients. Return 429 with these headers:\n  X-RateLimit-Limit:      Maximum requests allowed in window\n  X-RateLimit-Remaining:  Requests remaining in current window\n  X-RateLimit-Reset:      Unix timestamp when window resets\n  Retry-After:            Seconds until the client may retry Algorithms:\n  Fixed Window: Simple but susceptible to burst at window boundaries\n  Sliding Window: More accurate, moderately complex\n  Token Bucket: Allows controlled bursts; most intuitive model\n  Leaky Bucket: Smooths traffic, enforces average rate ERROR RESPONSE FORMAT\n--------------------- Consistent error responses make client-side error handling predictable. A minimal format: {\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Request validation failed\",\n    \"details\": [\n      { \"field\": \"email\", \"issue\": \"Must be a valid email address\" },\n      { \"field\": \"age\",   \"issue\": \"Must be a positive integer\" }\n    ]\n  }\n} Use machine-readable error codes (not just HTTP status) so clients can branch on specific conditions programmatically. IDEMPOTENCY\n----------- Idempotency keys allow clients to safely retry requests without causing duplicate side effects."
+      ],
+      "ground_truth": null,
+      "sources": [
+        {
+          "chunkId": "e1dc3bc6-6d3e-4f74-a264-2122191f27bf",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.556096
+        },
+        {
+          "chunkId": "358ead2e-eed8-4b59-b675-21c60296a905",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.49393177
+        }
+      ],
+      "metrics": {
+        "faithfulness": 0.6111111111111112,
+        "answer_relevancy": 0.9396348577298171
+      },
+      "error": null,
+      "duration_ms": 2938
+    },
+    {
+      "test_case_id": "tc-03",
+      "question": "What is compound interest and how is it calculated?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [],
+      "ground_truth": null,
+      "sources": [],
+      "metrics": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0
+      },
+      "error": null,
+      "duration_ms": 580
+    },
+    {
+      "test_case_id": "tc-04",
+      "question": "How much protein should a sedentary adult consume per day?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [],
+      "ground_truth": null,
+      "sources": [],
+      "metrics": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0
+      },
+      "error": null,
+      "duration_ms": 547
+    },
+    {
+      "test_case_id": "tc-05",
+      "question": "How many months of expenses should an emergency fund cover?",
+      "answer": "An emergency fund should cover 3–6 months of essential living expenses, depending on your circumstances. \n\n- 3 months for stable jobs, dual income households, and low fixed costs.\n- 6 months for single income households, those with variable income (such as self-employed or commission-based workers), and specialized careers where a longer job search might be necessary if laid off.\n- 9–12 months for business owners, those with highly variable income, or individuals with health conditions that increase medical risk.\n\n(Source: budgeting_guide.md)",
+      "contexts": [
+        "# The Complete Budgeting Guide: Taking Control of Your Money A budget is a plan for your money. Without one, spending decisions are made emotionally and reactively. With one, you are deliberate about what your money does. This guide covers the most effective budgeting methods, how to build an emergency fund, and strategies for eliminating debt. ## Why Budgeting Matters The average household earning $80,000 per year will receive over $3 million in lifetime income. How much of that becomes wealth depends almost entirely on the gap between income and spending — and the discipline to maintain it consistently. A budget accomplishes three things:\n1. Makes spending patterns visible (most people are shocked by what they discover)\n2. Creates intentional allocation toward goals (saving, investing, debt payoff)\n3. Reduces financial anxiety by eliminating uncertainty about whether bills can be paid ## The 50/30/20 Rule The simplest budgeting framework, popularized by Senator Elizabeth Warren in *All Your Worth*: - **50% to Needs:** Housing, utilities, groceries, transportation, minimum debt payments, insurance. These are obligations you cannot easily cut. - **30% to Wants:** Dining out, entertainment, subscriptions, clothing beyond basics, vacations. Enjoyable but discretionary. - **20% to Savings and Debt Payoff:** Emergency fund, retirement contributions, investing, extra debt payments. Apply percentages to **after-tax income** (take-home pay). The 50/30/20 split is a guideline, not a rigid rule. High cost-of-living cities may push housing alone past 35% of income, requiring adjustment. **When to deviate:** If you're carrying high-interest debt, temporarily push savings allocation to 30% and cut wants to 20%. If you're aggressively pursuing early retirement, reverse the wants/savings ratio. ## Zero-Based Budgeting Zero-based budgeting (ZBB) gives every dollar of income a specific job until income minus expenses equals zero. This does not mean spending every dollar — it means *assigning* every dollar, including to savings and investments. Steps:\n1. List your monthly after-tax income\n2. List every expense category: fixed (rent, loan payments) and variable (groceries, gas)\n3. Assign dollar amounts to each category\n4. Include savings as a budget line item (pay yourself first)\n5. Make the total equal your income exactly\n6. At month end, review actuals vs. plan and adjust next month's budget Zero-based budgeting requires more effort than the 50/30/20 rule but delivers much greater precision and awareness. Apps like YNAB (You Need A Budget) are built around this methodology. ## Tracking Your Spending A budget is useless if you don't track whether you followed it. **Tools:**\n- **YNAB:** Best-in-class zero-based budgeting software ($109/year). Strong methodology and community. - **Mint / Monarch Money:** Automated transaction import from bank accounts. Good for 50/30/20 style tracking. - **Spreadsheet:** Maximum flexibility, manual entry builds awareness. Simple template: date, merchant, amount, category. - **Envelope method:** Physical cash divided into labeled envelopes by category. Spending stops when the envelope is empty. Eliminates overspending at the cost of inconvenience. **The three categories worth scrutinizing closely:**\n1. **Food:** Dining out is the most common budget leak. Groceries versus restaurants versus coffee — the numbers often surprise people. 2. **Subscriptions:** List every monthly subscription. Most households have 10–20, totaling $200–$400/month, with several forgotten or barely used. 3. **Impulse purchases:** Retail browsing, one-click online shopping, convenience purchases. A 24-hour wait rule eliminates most impulse buys. ## Building an Emergency Fund",
+        "Simple template: date, merchant, amount, category. - **Envelope method:** Physical cash divided into labeled envelopes by category. Spending stops when the envelope is empty. Eliminates overspending at the cost of inconvenience. **The three categories worth scrutinizing closely:**\n1. **Food:** Dining out is the most common budget leak. Groceries versus restaurants versus coffee — the numbers often surprise people. 2. **Subscriptions:** List every monthly subscription. Most households have 10–20, totaling $200–$400/month, with several forgotten or barely used. 3. **Impulse purchases:** Retail browsing, one-click online shopping, convenience purchases. A 24-hour wait rule eliminates most impulse buys. ## Building an Emergency Fund An emergency fund is 3–6 months of essential living expenses held in a liquid, accessible account (high-yield savings account, money market account). This is the cornerstone of financial stability. **Why it matters:** Without an emergency fund, any unexpected expense (car repair, medical bill, job loss) forces you into debt. With one, emergencies become inconveniences rather than financial crises. **How much to hold:**\n- 3 months: Stable job, dual income household, low fixed costs\n- 6 months: Single income, variable income (self-employed, commission), specialized career (longer job search if laid off)\n- 9–12 months: Business owner, highly variable income, health conditions that increase medical risk **How to build it:** Treat it like a bill. Set up an automatic transfer to a separate high-yield savings account on payday, before you can spend the money. Keep emergency fund money in a different bank from your checking account to create friction against casual withdrawal. **What counts as an emergency:** Job loss, medical/dental emergency, major car or home repair needed for safety. New phones, sales events, travel, and gifts are not emergencies. ## Debt Payoff Strategies Two evidence-based methods: ### Debt Avalanche (Mathematically Optimal)\nList all debts from highest to lowest interest rate. Pay minimums on all debts. Put every extra dollar toward the highest-rate debt. When it is paid off, roll that payment to the next debt on the list. Result: Minimum total interest paid, fastest mathematical payoff. Best for people motivated by numbers. Example priority order: Credit card (24%) → Personal loan (14%) → Car loan (7%) → Student loan (5%) ### Debt Snowball (Psychologically Powerful)\nList all debts from smallest to largest balance, regardless of interest rate. Pay minimums on all. Put every extra dollar toward the smallest balance. When it is paid off, roll that payment to the next. Result: Quick wins build momentum. Research (particularly from Dr. David Gal) shows behavior change, not math, is the biggest barrier to debt payoff. Many people succeed with snowball who fail with avalanche. **Which to choose:** If you're disciplined and motivated by efficiency, use avalanche. If you've started debt payoff and stopped before (or are skeptical you'll stick with it), use snowball. The best strategy is the one you'll actually follow. ## Sinking Funds A sinking fund is money set aside each month for a predictable but irregular expense. Instead of a $1,200 car insurance bill in January hitting your budget as a shock, you save $100/month all year. Common sinking funds:\n- Car insurance (annual or semi-annual)\n- Home or renter's insurance\n- Vehicle registration and maintenance\n- Annual subscriptions (Amazon Prime, software licenses)\n- Holiday gifts\n- Travel and vacation\n- Medical deductible Sinking funds turn irregular expenses into smooth, predictable monthly costs. Create a separate savings bucket (most banks support multiple savings accounts or sub-accounts) labeled for each fund. ## The Psychological Side of Budgeting **Automate everything possible.** Willpower is a limited resource."
+      ],
+      "ground_truth": null,
+      "sources": [
+        {
+          "chunkId": "4b36afd4-4131-492c-9137-f7eba0cabd45",
+          "documentId": "37e9a682-9341-48ad-82b1-6bc3b27c39e3",
+          "documentName": "budgeting_guide.md",
+          "score": 0.44644654
+        },
+        {
+          "chunkId": "18cd265a-f50f-4556-9f84-84f5b117212f",
+          "documentId": "37e9a682-9341-48ad-82b1-6bc3b27c39e3",
+          "documentName": "budgeting_guide.md",
+          "score": 0.4313854
+        }
+      ],
+      "metrics": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8362213624567228
+      },
+      "error": null,
+      "duration_ms": 2184
+    },
+    {
+      "test_case_id": "tc-06",
+      "question": "What is the purpose of the uniform interface constraint in REST?",
+      "answer": "The purpose of the uniform interface constraint in REST is to provide a standardized way of accessing and manipulating resources. This constraint is where most practical guidance comes from in REST, ensuring that resources are identified with a unique URI, and actions are expressed through HTTP methods. This allows HTTP caches, proxies, and clients to make safe assumptions about the API's behavior, contributing to consistency and intuitive use across different clients and services. \n\n[Source: api_design_principles.txt]",
+      "contexts": [
+        "API DESIGN PRINCIPLES FOR MODERN BACKEND SERVICES\n=================================================== A well-designed API is the contract between your service and every client that depends on it. Getting it right matters enormously — once published, changing an API is costly. This guide covers the principles and practices that produce APIs that are intuitive, consistent, and maintainable over time. REST FUNDAMENTALS\n----------------- REST (Representational State Transfer) is an architectural style, not a protocol. The six constraints that define a RESTful system are: client-server separation, statelessness, cacheability, uniform interface, layered system, and optional code-on-demand. The uniform interface constraint is where most practical guidance comes from: Resource Identification: Everything is a resource with a unique URI. Use nouns, not verbs. The action is expressed by the HTTP method. Good:   GET /users/42\n  Bad:    GET /getUser?id=42 HTTP Method Semantics:\n  GET     — Read a resource. Must be safe and idempotent. No side effects. POST    — Create a new resource or trigger a non-idempotent action. PUT     — Replace a resource entirely (idempotent). PATCH   — Partially update a resource. DELETE  — Remove a resource (idempotent). Using methods correctly lets HTTP caches, proxies, and clients make safe assumptions about your API's behavior. HTTP STATUS CODES\n----------------- Status codes communicate the outcome of a request. Misusing them — returning 200 with an error body — breaks every HTTP-aware tool in the ecosystem. 2xx — Success\n  200 OK              Standard success for GET, PUT, PATCH\n  201 Created         Resource was created; include Location header with new URI\n  204 No Content      Success with no response body (common for DELETE) 4xx — Client Errors\n  400 Bad Request     Malformed request syntax or invalid parameters\n  401 Unauthorized    Missing or invalid authentication credentials\n  403 Forbidden       Authenticated but not authorized for this resource\n  404 Not Found       Resource does not exist\n  409 Conflict        Request conflicts with current state (e.g., duplicate create)\n  422 Unprocessable   Valid syntax but semantically invalid (validation errors)\n  429 Too Many Req. Rate limit exceeded; include Retry-After header 5xx — Server Errors\n  500 Internal Error  Unexpected server failure\n  502 Bad Gateway     Upstream service failure\n  503 Unavailable     Service overloaded or in maintenance; include Retry-After VERSIONING STRATEGIES\n--------------------- APIs must evolve, but changes that break existing clients are unacceptable without a migration path. Three common approaches: URI Versioning: /v1/users, /v2/users\n  Pros: Explicit, easy to route, visible in logs and browser bookmarks. Cons: Technically violates REST (same resource, different URI), pollutes the URL space. Best for: Public APIs with long-lived clients. Header Versioning: Accept: application/vnd.myapi.v2+json\n  Pros: Clean URLs, semantically correct. Cons: Invisible in browser, harder to test manually. Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself."
+      ],
+      "ground_truth": null,
+      "sources": [
+        {
+          "chunkId": "e1dc3bc6-6d3e-4f74-a264-2122191f27bf",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.4327669
+        }
+      ],
+      "metrics": {
+        "faithfulness": 0.3333333333333333,
+        "answer_relevancy": 1.0
+      },
+      "error": null,
+      "duration_ms": 1511
+    },
+    {
+      "test_case_id": "tc-07",
+      "question": "How does dollar-cost averaging help a retirement investor reduce risk?",
+      "answer": "Dollar-cost averaging (DCA) helps a retirement investor reduce risk by investing a fixed dollar amount at regular intervals regardless of market conditions, which has several benefits:\n\n1. It eliminates the need to \"time the market,\" reducing the pressure and potential stress associated with trying to buy at the \"right time.\"\n2. When prices are high, the investor buys fewer shares, and when prices are low, more shares are purchased. This results in a lower average cost per share over time.\n3. By avoiding the investment of a large sum at a market peak, DCA reduces the risk of significant losses if the market declines shortly after investing. \n4. It builds the discipline of consistent investing, ensuring regular contributions to the retirement investment portfolio.\n\nThese aspects of DCA can help smooth out the volatility of the markets and reduce the impact of market downturns on the overall investment. (Source: investment_basics.md)",
+      "contexts": [
+        "They often move in opposite directions (negative correlation), smoothing portfolio volatility. **Geographic diversification:** International stocks (developed markets like Europe and Japan, emerging markets like India and Brazil) have different economic cycles and currency exposures than U.S. stocks. **Sector diversification:** Within stocks, spreading across technology, healthcare, financials, consumer staples, energy, etc. avoids concentration risk in any one industry. The correlation between assets is what matters most. Assets that move independently of each other provide more diversification benefit than assets that move together. ## Key Valuation Metrics **Price-to-Earnings (P/E) Ratio:** Stock price divided by earnings per share. Tells you how much you're paying for each dollar of earnings. A P/E of 20 means you pay $20 for every $1 of annual earnings. High P/E suggests high growth expectations; low P/E may signal undervaluation or declining prospects. **Market Capitalization:** Total market value of a company's outstanding shares (price × shares outstanding). Categories: Large-cap (>$10B), Mid-cap ($2B–$10B), Small-cap (<$2B). Smaller companies tend to have higher growth potential but also higher risk and volatility. **Dividend Yield:** Annual dividends per share divided by the stock price. A 3% yield means you receive $3 per year per $100 invested in dividends, regardless of price movement. ## Dollar-Cost Averaging Dollar-cost averaging (DCA) means investing a fixed dollar amount at regular intervals (e.g., $500 every month) regardless of market conditions. When prices are high, you buy fewer shares; when prices are low, you buy more. Benefits:\n- Eliminates the paralyzing need to \"time the market\"\n- Automatically buys more at lower prices\n- Reduces the risk of investing a large sum at a market peak\n- Builds the discipline of consistent investing Most employer-sponsored retirement plans (401k) implement DCA automatically via payroll deduction. ## Risk and Return Risk and return are inseparable. Higher potential returns require accepting higher risk — the possibility of loss. Key risk types: - **Market risk (systematic):** Cannot be diversified away. The whole market falling in a recession affects everything. - **Company risk (unsystematic):** Specific to one stock. Eliminated by holding many stocks. - **Interest rate risk:** Primarily affects bonds. Rising rates reduce existing bond values. - **Inflation risk:** Fixed returns lose purchasing power as prices rise. **Risk tolerance** is highly personal. It depends on your time horizon (when you need the money), financial capacity to absorb losses (other income, emergency fund), and psychological comfort with portfolio volatility. ## Getting Started 1. Build a 3–6 month emergency fund in a high-yield savings account before investing\n2. Contribute enough to your 401(k) to capture any employer match (free money)\n3. Open a Roth IRA and max it ($7,000/year in 2024) if income-eligible\n4. Invest in low-cost total market or S&P 500 index funds\n5. Automate contributions and resist the urge to react to market swings\n6. Increase contributions with every raise Time in the market consistently beats timing the market. Starting early and staying consistent matters more than picking the \"right\" investments.",
+        "The key insight of FIRE is that traditional retirement planning — save 10–15% of income for 40 years — is not the only option. Dramatically increasing savings rates compresses the timeline dramatically. ## Asset Allocation and Glide Paths **Asset allocation** is how you divide your portfolio between asset classes (stocks vs. bonds). In general:\n- Younger investors: 80–100% stocks (long time horizon absorbs volatility)\n- Approaching retirement: Shift toward bonds to reduce sequence-of-returns risk\n- In retirement: Roughly 60% stocks / 40% bonds is a common starting point, adjusted by spending needs and longevity **Target-date funds** implement a glide path automatically. A 2055 fund starts aggressively growth-oriented and gradually becomes conservative as 2055 approaches. These are excellent set-and-forget options for 401(k) accounts. **Sequence of returns risk:** The biggest retirement-specific financial risk. Poor returns in the first 5–10 years of retirement, while withdrawing from the portfolio, can permanently impair a retirement account even if long-term average returns recover. Mitigation: maintain 2–3 years of living expenses in cash/bonds as a buffer; avoid selling equities in down years. ## Common Mistakes 1. **Cashing out a 401(k) when changing jobs.** You pay income tax plus a 10% penalty and lose future compound growth. Always roll to an IRA or new employer's plan. 2. **Not increasing contributions with raises.** Lifestyle inflation is retirement's enemy. Bank at least half of every raise. 3. **Holding too much company stock.** Your income and investments should not both be exposed to the same company's fate. 4. **Underestimating healthcare costs.** A couple retiring at 65 is estimated to need $315,000 for healthcare costs in retirement, not counting long-term care. 5. **Claiming Social Security too early.** Claiming at 62 vs. 70 can mean a 76% difference in monthly benefit.",
+        "**2024 IRA contribution limit:** $7,000 ($8,000 if age 50+) **Roth IRA income limits (2024):** Phase-out begins at $146,000 (single) / $230,000 (married filing jointly). Above these thresholds, use a \"backdoor Roth\" — contribute to a Traditional IRA and convert. **Optimal contribution order:**\n1. 401(k) to capture full employer match\n2. Max Roth IRA ($7,000)\n3. Return to 401(k) up to annual limit\n4. Taxable brokerage account for additional savings ### Health Savings Account (HSA): The Secret Retirement Account\nAn HSA is the most tax-advantaged account available. If you have a High-Deductible Health Plan (HDHP), you can contribute pre-tax, invest the balance in the market, and withdraw tax-free for qualified medical expenses. After age 65, withdrawals for any purpose are taxed like a Traditional IRA — but never penalized. **The optimal HSA strategy:** Pay medical expenses out of pocket now. Save receipts. Let HSA funds compound in index funds. In retirement, reimburse yourself for decades of past expenses — tax-free. ## Target Retirement Numbers **The 4% Rule (Withdrawal Rate):** A portfolio can sustain 4% annual withdrawals (inflation-adjusted) for 30+ years with very high probability. To find your target number: multiply your desired annual retirement income by 25. - $40,000/year in retirement → need $1,000,000 saved\n- $60,000/year → need $1,500,000\n- $80,000/year → need $2,000,000 This is a simplified rule. Actual sustainability depends on asset allocation, sequence of returns risk, and retirement duration. With a 40+ year retirement (early retirement), a 3.5% withdrawal rate is more conservative and appropriate. **Social Security:** Not a complete retirement solution, but a meaningful floor. Average benefit in 2024: approximately $1,907/month. Benefits increase by 8% for each year you delay claiming past full retirement age (up to age 70). If healthy, delaying to 70 is almost always mathematically optimal. ## The FIRE Movement FIRE (Financial Independence, Retire Early) is a lifestyle and financial planning philosophy centered on extreme savings rates (40–70% of income) to achieve financial independence decades before traditional retirement age. **FIRE variants:**\n- **LeanFIRE:** Retire on $25,000–$40,000/year. Requires significant frugality in retirement. - **FatFIRE:** Retire on $80,000–$100,000+/year. Requires larger portfolios ($2M+). - **BaristaFIRE:** Semi-retire. Work part-time (e.g., at a coffee shop) for health insurance and supplemental income while the portfolio covers most expenses. - **CoastFIRE:** Save aggressively early until your portfolio is large enough to coast to traditional retirement age without additional contributions. Stop saving, work any job you want. The key insight of FIRE is that traditional retirement planning — save 10–15% of income for 40 years — is not the only option. Dramatically increasing savings rates compresses the timeline dramatically. ## Asset Allocation and Glide Paths **Asset allocation** is how you divide your portfolio between asset classes (stocks vs. bonds). In general:\n- Younger investors: 80–100% stocks (long time horizon absorbs volatility)\n- Approaching retirement: Shift toward bonds to reduce sequence-of-returns risk\n- In retirement: Roughly 60% stocks / 40% bonds is a common starting point, adjusted by spending needs and longevity **Target-date funds** implement a glide path automatically.",
+        "# Retirement Planning: Building Long-Term Financial Security Retirement planning is the process of determining how much income you will need in retirement, identifying sources of that income, and building the savings required to fund the gap. Starting early is the single biggest variable within your control — the math of compound interest heavily rewards those who begin in their 20s and 30s. ## Why Starting Early Is Everything: Compound Interest Compound interest is earning returns on your returns. Over long periods, it produces results that feel counterintuitive. **The twin investor example:**\n- Alex invests $5,000/year from age 25 to 35 (10 years, $50,000 total), then stops. - Jordan invests $5,000/year from age 35 to 65 (30 years, $150,000 total). - At age 65, assuming 7% annual returns: Alex has approximately $602,000. Jordan has approximately $472,000. Alex invested 1/3 the amount and ended with more money, simply because compound growth had 10 more years to work. The lesson: **time in the market is the most powerful lever in retirement planning**. ## Account Types ### 401(k) — Employer-Sponsored Retirement Plan\nA 401(k) is an employer-sponsored defined-contribution retirement plan. Contributions are made pre-tax (Traditional) or post-tax (Roth), reducing current or future tax burden respectively. **2024 contribution limits:** $23,000 ($30,500 if age 50 or older — \"catch-up contributions\") **Employer match:** Many employers match a percentage of your contributions (e.g., 100% of the first 3% of salary). This is free money. Never leave an unmatched employer contribution on the table — it is an immediate 50%–100% return on your investment. **Investment options:** 401(k) plans offer a menu of mutual funds and target-date funds chosen by your employer. Options are often limited; choose the lowest-expense-ratio index funds available. **Traditional vs. Roth 401(k):**\n- Traditional: Contributions reduce taxable income now; withdrawals in retirement are taxed as ordinary income. - Roth: Contributions are post-tax; withdrawals in retirement are completely tax-free. - General rule: If you expect to be in a higher tax bracket in retirement than now, Roth is better. If you're in your peak earning years, Traditional may be better. ### Individual Retirement Account (IRA)\nAn IRA is a personal retirement account not tied to an employer. Two main types: **Traditional IRA:**\n- Contributions may be tax-deductible (depending on income and whether you have a workplace plan)\n- Growth is tax-deferred\n- Withdrawals taxed as ordinary income\n- Required Minimum Distributions (RMDs) starting at age 73 **Roth IRA:**\n- Contributions are post-tax (never deductible)\n- Growth is completely tax-free\n- Qualified withdrawals are tax-free\n- No RMDs during the account owner's lifetime — accounts can compound indefinitely\n- Contributions (not earnings) can be withdrawn any time without penalty **2024 IRA contribution limit:** $7,000 ($8,000 if age 50+) **Roth IRA income limits (2024):** Phase-out begins at $146,000 (single) / $230,000 (married filing jointly). Above these thresholds, use a \"backdoor Roth\" — contribute to a Traditional IRA and convert. **Optimal contribution order:**\n1. 401(k) to capture full employer match\n2. Max Roth IRA ($7,000)\n3. Return to 401(k) up to annual limit\n4. Taxable brokerage account for additional savings ### Health Savings Account (HSA): The Secret Retirement Account\nAn HSA is the most tax-advantaged account available."
+      ],
+      "ground_truth": "Dollar-cost averaging (DCA) is an investment strategy where a fixed amount is invested at regular intervals regardless of price. For retirement investors this reduces the impact of market volatility: buying more units when prices are low and fewer when prices are high smooths the average cost basis over time, lowering the risk of making a large investment at a market peak.",
+      "sources": [
+        {
+          "chunkId": "cc6225ce-5dc5-4355-a70d-8954d7c28d12",
+          "documentId": "f87633f2-2814-441d-b0c7-5d204f9aab51",
+          "documentName": "investment_basics.md",
+          "score": 0.53003585
+        },
+        {
+          "chunkId": "3505824a-7fff-40cb-b3cd-e9259b74cecb",
+          "documentId": "9feb9752-8ca5-4497-a5b1-2ff2525ceb81",
+          "documentName": "retirement_planning.md",
+          "score": 0.4712155
+        },
+        {
+          "chunkId": "166955a7-033d-4554-b63f-078b78f48d78",
+          "documentId": "9feb9752-8ca5-4497-a5b1-2ff2525ceb81",
+          "documentName": "retirement_planning.md",
+          "score": 0.44403794
+        },
+        {
+          "chunkId": "779ab302-553d-4710-8195-095459e970fa",
+          "documentId": "9feb9752-8ca5-4497-a5b1-2ff2525ceb81",
+          "documentName": "retirement_planning.md",
+          "score": 0.4004721
+        }
+      ],
+      "metrics": {
+        "faithfulness": 0.6363636363636364,
+        "answer_relevancy": 0.9603213466833797,
+        "llm_context_precision_with_reference": 0.9999999999,
+        "context_recall": 1.0,
+        "answer_correctness": 0.6357873224156665
+      },
+      "error": null,
+      "duration_ms": 2195
+    },
+    {
+      "test_case_id": "tc-08",
+      "question": "What high-protein foods are suitable to pack for long-haul travel to Japan?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [],
+      "ground_truth": "High-protein travel-friendly foods include jerky, nuts, protein bars, and hard-boiled eggs. Japan does not restrict most food imports from Canada, but raw meats and fresh produce are prohibited. Pre-packaged, shelf-stable high-protein snacks such as jerky and protein bars are suitable for carry-on.",
+      "sources": [],
+      "metrics": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0,
+        "llm_context_precision_with_reference": 0.0,
+        "context_recall": 0.0,
+        "answer_correctness": 0.00602317082156312
+      },
+      "error": null,
+      "duration_ms": 808
+    },
+    {
+      "test_case_id": "tc-09",
+      "question": "What is the visa requirement for a Canadian citizen travelling to Japan?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [],
+      "ground_truth": "Canadian citizens do not require a visa to visit Japan for stays of up to 90 days.",
+      "sources": [],
+      "metrics": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0,
+        "llm_context_precision_with_reference": 0.0,
+        "context_recall": 0.0,
+        "answer_correctness": 0.01356489258902549
+      },
+      "error": null,
+      "duration_ms": 837
+    },
+    {
+      "test_case_id": "tc-10",
+      "question": "Is a REST API connectionless between requests?",
+      "answer": "Yes, a REST API is connectionless between requests. This is due to the statelessness constraint of REST, which means that each request from client to server must contain all of the information needed to understand and process the request, and the server does not store any session state between requests. This allows for a connectionless interaction between the client and the server. (Source: api_design_principles.txt)",
+      "contexts": [
+        "API DESIGN PRINCIPLES FOR MODERN BACKEND SERVICES\n=================================================== A well-designed API is the contract between your service and every client that depends on it. Getting it right matters enormously — once published, changing an API is costly. This guide covers the principles and practices that produce APIs that are intuitive, consistent, and maintainable over time. REST FUNDAMENTALS\n----------------- REST (Representational State Transfer) is an architectural style, not a protocol. The six constraints that define a RESTful system are: client-server separation, statelessness, cacheability, uniform interface, layered system, and optional code-on-demand. The uniform interface constraint is where most practical guidance comes from: Resource Identification: Everything is a resource with a unique URI. Use nouns, not verbs. The action is expressed by the HTTP method. Good:   GET /users/42\n  Bad:    GET /getUser?id=42 HTTP Method Semantics:\n  GET     — Read a resource. Must be safe and idempotent. No side effects. POST    — Create a new resource or trigger a non-idempotent action. PUT     — Replace a resource entirely (idempotent). PATCH   — Partially update a resource. DELETE  — Remove a resource (idempotent). Using methods correctly lets HTTP caches, proxies, and clients make safe assumptions about your API's behavior. HTTP STATUS CODES\n----------------- Status codes communicate the outcome of a request. Misusing them — returning 200 with an error body — breaks every HTTP-aware tool in the ecosystem. 2xx — Success\n  200 OK              Standard success for GET, PUT, PATCH\n  201 Created         Resource was created; include Location header with new URI\n  204 No Content      Success with no response body (common for DELETE) 4xx — Client Errors\n  400 Bad Request     Malformed request syntax or invalid parameters\n  401 Unauthorized    Missing or invalid authentication credentials\n  403 Forbidden       Authenticated but not authorized for this resource\n  404 Not Found       Resource does not exist\n  409 Conflict        Request conflicts with current state (e.g., duplicate create)\n  422 Unprocessable   Valid syntax but semantically invalid (validation errors)\n  429 Too Many Req. Rate limit exceeded; include Retry-After header 5xx — Server Errors\n  500 Internal Error  Unexpected server failure\n  502 Bad Gateway     Upstream service failure\n  503 Unavailable     Service overloaded or in maintenance; include Retry-After VERSIONING STRATEGIES\n--------------------- APIs must evolve, but changes that break existing clients are unacceptable without a migration path. Three common approaches: URI Versioning: /v1/users, /v2/users\n  Pros: Explicit, easy to route, visible in logs and browser bookmarks. Cons: Technically violates REST (same resource, different URI), pollutes the URL space. Best for: Public APIs with long-lived clients. Header Versioning: Accept: application/vnd.myapi.v2+json\n  Pros: Clean URLs, semantically correct. Cons: Invisible in browser, harder to test manually. Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself.",
+        "Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself. Key JWT security practices:\n- Use short expiry times (15 minutes to 1 hour) with refresh tokens for long sessions\n- Sign with RS256 (asymmetric) for services that only need to verify, not issue tokens\n- Never store sensitive data in JWT payload — it is base64-encoded, not encrypted\n- Validate: signature, expiry (exp), audience (aud), and issuer (iss) API Keys: Simpler than JWT. Suitable for server-to-server communication where a long-lived credential is acceptable. Should be generated cryptographically (UUID v4 or 32 random bytes), stored as a hash, and scoped to specific permissions. OAuth 2.0: The standard for delegated authorization. A user grants your API limited access to their data on another service (e.g., Google Drive). Do not implement OAuth from scratch — use a well-audited library. PAGINATION\n---------- Never return unbounded collections. Three common pagination patterns: Offset Pagination: ?page=3&limit=20\n  Simple to implement and understand. Suffers from the \"page drift\" problem — if items are added or deleted between requests, pages shift and the client may see duplicates or miss items. Cursor Pagination: ?after=eyJpZCI6MjB9&limit=20\n  The cursor is an opaque token (usually base64-encoded ID or timestamp) pointing to a position in the dataset. Stable regardless of inserts or deletes. Required for real-time feeds. More complex to implement. Keyset Pagination: ?after_id=20&limit=20\n  Similar to cursor but the key is visible. Works well on indexed columns; degraded performance on non-indexed columns. Always include metadata in list responses: total count, next/previous cursor or page links. RATE LIMITING\n------------- Protect your API from abuse and ensure fair usage across clients. Return 429 with these headers:\n  X-RateLimit-Limit:      Maximum requests allowed in window\n  X-RateLimit-Remaining:  Requests remaining in current window\n  X-RateLimit-Reset:      Unix timestamp when window resets\n  Retry-After:            Seconds until the client may retry Algorithms:\n  Fixed Window: Simple but susceptible to burst at window boundaries\n  Sliding Window: More accurate, moderately complex\n  Token Bucket: Allows controlled bursts; most intuitive model\n  Leaky Bucket: Smooths traffic, enforces average rate ERROR RESPONSE FORMAT\n--------------------- Consistent error responses make client-side error handling predictable. A minimal format: {\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Request validation failed\",\n    \"details\": [\n      { \"field\": \"email\", \"issue\": \"Must be a valid email address\" },\n      { \"field\": \"age\",   \"issue\": \"Must be a positive integer\" }\n    ]\n  }\n} Use machine-readable error codes (not just HTTP status) so clients can branch on specific conditions programmatically. IDEMPOTENCY\n----------- Idempotency keys allow clients to safely retry requests without causing duplicate side effects."
+      ],
+      "ground_truth": "REST APIs are stateless, not specifically 'connectionless' in the protocol sense. Each request must contain all information needed to process it; the server retains no session state between calls. The underlying HTTP/1.1 connection may persist (keep-alive), but from the REST perspective each request is independent.",
+      "sources": [
+        {
+          "chunkId": "e1dc3bc6-6d3e-4f74-a264-2122191f27bf",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.42558536
+        },
+        {
+          "chunkId": "358ead2e-eed8-4b59-b675-21c60296a905",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.40604627
+        }
+      ],
+      "metrics": {
+        "faithfulness": 0.4,
+        "answer_relevancy": 0.9999999999999999,
+        "llm_context_precision_with_reference": 0.9999999999,
+        "context_recall": 0.6666666666666666,
+        "answer_correctness": 0.6311779574771358
+      },
+      "error": null,
+      "duration_ms": 1171
+    },
+    {
+      "test_case_id": "tc-11",
+      "question": "What HTTP methods are explicitly listed as unsafe in the REST API guide?",
+      "answer": "The REST API guide does not explicitly list any HTTP methods as \"unsafe.\" However, it does describe the `GET` method as \"safe\" because it should have no side effects, implying other methods like `POST`, which is used to create a new resource or trigger a non-idempotent action, could be considered unsafe. The guide discusses the idempotent nature of `PUT`, `PATCH`, and `DELETE`, without using the term \"unsafe.\"",
+      "contexts": [
+        "API DESIGN PRINCIPLES FOR MODERN BACKEND SERVICES\n=================================================== A well-designed API is the contract between your service and every client that depends on it. Getting it right matters enormously — once published, changing an API is costly. This guide covers the principles and practices that produce APIs that are intuitive, consistent, and maintainable over time. REST FUNDAMENTALS\n----------------- REST (Representational State Transfer) is an architectural style, not a protocol. The six constraints that define a RESTful system are: client-server separation, statelessness, cacheability, uniform interface, layered system, and optional code-on-demand. The uniform interface constraint is where most practical guidance comes from: Resource Identification: Everything is a resource with a unique URI. Use nouns, not verbs. The action is expressed by the HTTP method. Good:   GET /users/42\n  Bad:    GET /getUser?id=42 HTTP Method Semantics:\n  GET     — Read a resource. Must be safe and idempotent. No side effects. POST    — Create a new resource or trigger a non-idempotent action. PUT     — Replace a resource entirely (idempotent). PATCH   — Partially update a resource. DELETE  — Remove a resource (idempotent). Using methods correctly lets HTTP caches, proxies, and clients make safe assumptions about your API's behavior. HTTP STATUS CODES\n----------------- Status codes communicate the outcome of a request. Misusing them — returning 200 with an error body — breaks every HTTP-aware tool in the ecosystem. 2xx — Success\n  200 OK              Standard success for GET, PUT, PATCH\n  201 Created         Resource was created; include Location header with new URI\n  204 No Content      Success with no response body (common for DELETE) 4xx — Client Errors\n  400 Bad Request     Malformed request syntax or invalid parameters\n  401 Unauthorized    Missing or invalid authentication credentials\n  403 Forbidden       Authenticated but not authorized for this resource\n  404 Not Found       Resource does not exist\n  409 Conflict        Request conflicts with current state (e.g., duplicate create)\n  422 Unprocessable   Valid syntax but semantically invalid (validation errors)\n  429 Too Many Req. Rate limit exceeded; include Retry-After header 5xx — Server Errors\n  500 Internal Error  Unexpected server failure\n  502 Bad Gateway     Upstream service failure\n  503 Unavailable     Service overloaded or in maintenance; include Retry-After VERSIONING STRATEGIES\n--------------------- APIs must evolve, but changes that break existing clients are unacceptable without a migration path. Three common approaches: URI Versioning: /v1/users, /v2/users\n  Pros: Explicit, easy to route, visible in logs and browser bookmarks. Cons: Technically violates REST (same resource, different URI), pollutes the URL space. Best for: Public APIs with long-lived clients. Header Versioning: Accept: application/vnd.myapi.v2+json\n  Pros: Clean URLs, semantically correct. Cons: Invisible in browser, harder to test manually. Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself.",
+        "Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself. Key JWT security practices:\n- Use short expiry times (15 minutes to 1 hour) with refresh tokens for long sessions\n- Sign with RS256 (asymmetric) for services that only need to verify, not issue tokens\n- Never store sensitive data in JWT payload — it is base64-encoded, not encrypted\n- Validate: signature, expiry (exp), audience (aud), and issuer (iss) API Keys: Simpler than JWT. Suitable for server-to-server communication where a long-lived credential is acceptable. Should be generated cryptographically (UUID v4 or 32 random bytes), stored as a hash, and scoped to specific permissions. OAuth 2.0: The standard for delegated authorization. A user grants your API limited access to their data on another service (e.g., Google Drive). Do not implement OAuth from scratch — use a well-audited library. PAGINATION\n---------- Never return unbounded collections. Three common pagination patterns: Offset Pagination: ?page=3&limit=20\n  Simple to implement and understand. Suffers from the \"page drift\" problem — if items are added or deleted between requests, pages shift and the client may see duplicates or miss items. Cursor Pagination: ?after=eyJpZCI6MjB9&limit=20\n  The cursor is an opaque token (usually base64-encoded ID or timestamp) pointing to a position in the dataset. Stable regardless of inserts or deletes. Required for real-time feeds. More complex to implement. Keyset Pagination: ?after_id=20&limit=20\n  Similar to cursor but the key is visible. Works well on indexed columns; degraded performance on non-indexed columns. Always include metadata in list responses: total count, next/previous cursor or page links. RATE LIMITING\n------------- Protect your API from abuse and ensure fair usage across clients. Return 429 with these headers:\n  X-RateLimit-Limit:      Maximum requests allowed in window\n  X-RateLimit-Remaining:  Requests remaining in current window\n  X-RateLimit-Reset:      Unix timestamp when window resets\n  Retry-After:            Seconds until the client may retry Algorithms:\n  Fixed Window: Simple but susceptible to burst at window boundaries\n  Sliding Window: More accurate, moderately complex\n  Token Bucket: Allows controlled bursts; most intuitive model\n  Leaky Bucket: Smooths traffic, enforces average rate ERROR RESPONSE FORMAT\n--------------------- Consistent error responses make client-side error handling predictable. A minimal format: {\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Request validation failed\",\n    \"details\": [\n      { \"field\": \"email\", \"issue\": \"Must be a valid email address\" },\n      { \"field\": \"age\",   \"issue\": \"Must be a positive integer\" }\n    ]\n  }\n} Use machine-readable error codes (not just HTTP status) so clients can branch on specific conditions programmatically. IDEMPOTENCY\n----------- Idempotency keys allow clients to safely retry requests without causing duplicate side effects."
+      ],
+      "ground_truth": "POST, PUT, PATCH, and DELETE are unsafe HTTP methods because they modify server state. The REST API guide lists these methods in the context of HTTP semantics and idempotency.",
+      "sources": [
+        {
+          "chunkId": "e1dc3bc6-6d3e-4f74-a264-2122191f27bf",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.48702702
+        },
+        {
+          "chunkId": "358ead2e-eed8-4b59-b675-21c60296a905",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.4750745
+        }
+      ],
+      "metrics": {
+        "faithfulness": 0.8333333333333334,
+        "answer_relevancy": 0.9214158722582125,
+        "llm_context_precision_with_reference": 0.9999999999,
+        "context_recall": 0.0,
+        "answer_correctness": 0.4421557874051547
+      },
+      "error": null,
+      "duration_ms": 1477
+    },
+    {
+      "test_case_id": "tc-12",
+      "question": "What is the recommended daily intake of selenium for adult women according to the nutrition guide?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [],
+      "ground_truth": "The recommended daily intake of selenium for adult women is 55 micrograms per day, according to the nutrition guide.",
+      "sources": [],
+      "metrics": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0,
+        "llm_context_precision_with_reference": 0.0,
+        "context_recall": 0.0,
+        "answer_correctness": 0.014146389379424718
+      },
+      "error": null,
+      "duration_ms": 570
+    },
+    {
+      "test_case_id": "tc-13",
+      "question": "What are the tax advantages of contributing to an RRSP?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [],
+      "ground_truth": "RRSP contributions reduce your taxable income in the year of contribution. Investment growth inside an RRSP is tax-deferred until withdrawal. Withdrawals are taxed as income, ideally at retirement when marginal rates are lower.",
+      "sources": [],
+      "metrics": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0,
+        "llm_context_precision_with_reference": 0.0,
+        "context_recall": 0.0,
+        "answer_correctness": 0.010802160638248511
+      },
+      "error": null,
+      "duration_ms": 771
+    },
+    {
+      "test_case_id": "tc-18",
+      "question": "What is the current stock price of Apple Inc.?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [],
+      "ground_truth": "I don't know based on the provided documents.",
+      "sources": [],
+      "metrics": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.0,
+        "llm_context_precision_with_reference": 0.0,
+        "context_recall": 0.0,
+        "answer_correctness": 0.9999998296300084
+      },
+      "error": null,
+      "duration_ms": 517
+    },
+    {
+      "test_case_id": "tc-19",
+      "question": "What is the layered system constraint in REST?",
+      "answer": "I don't know based on the provided documents.",
+      "contexts": [
+        "API DESIGN PRINCIPLES FOR MODERN BACKEND SERVICES\n=================================================== A well-designed API is the contract between your service and every client that depends on it. Getting it right matters enormously — once published, changing an API is costly. This guide covers the principles and practices that produce APIs that are intuitive, consistent, and maintainable over time. REST FUNDAMENTALS\n----------------- REST (Representational State Transfer) is an architectural style, not a protocol. The six constraints that define a RESTful system are: client-server separation, statelessness, cacheability, uniform interface, layered system, and optional code-on-demand. The uniform interface constraint is where most practical guidance comes from: Resource Identification: Everything is a resource with a unique URI. Use nouns, not verbs. The action is expressed by the HTTP method. Good:   GET /users/42\n  Bad:    GET /getUser?id=42 HTTP Method Semantics:\n  GET     — Read a resource. Must be safe and idempotent. No side effects. POST    — Create a new resource or trigger a non-idempotent action. PUT     — Replace a resource entirely (idempotent). PATCH   — Partially update a resource. DELETE  — Remove a resource (idempotent). Using methods correctly lets HTTP caches, proxies, and clients make safe assumptions about your API's behavior. HTTP STATUS CODES\n----------------- Status codes communicate the outcome of a request. Misusing them — returning 200 with an error body — breaks every HTTP-aware tool in the ecosystem. 2xx — Success\n  200 OK              Standard success for GET, PUT, PATCH\n  201 Created         Resource was created; include Location header with new URI\n  204 No Content      Success with no response body (common for DELETE) 4xx — Client Errors\n  400 Bad Request     Malformed request syntax or invalid parameters\n  401 Unauthorized    Missing or invalid authentication credentials\n  403 Forbidden       Authenticated but not authorized for this resource\n  404 Not Found       Resource does not exist\n  409 Conflict        Request conflicts with current state (e.g., duplicate create)\n  422 Unprocessable   Valid syntax but semantically invalid (validation errors)\n  429 Too Many Req. Rate limit exceeded; include Retry-After header 5xx — Server Errors\n  500 Internal Error  Unexpected server failure\n  502 Bad Gateway     Upstream service failure\n  503 Unavailable     Service overloaded or in maintenance; include Retry-After VERSIONING STRATEGIES\n--------------------- APIs must evolve, but changes that break existing clients are unacceptable without a migration path. Three common approaches: URI Versioning: /v1/users, /v2/users\n  Pros: Explicit, easy to route, visible in logs and browser bookmarks. Cons: Technically violates REST (same resource, different URI), pollutes the URL space. Best for: Public APIs with long-lived clients. Header Versioning: Accept: application/vnd.myapi.v2+json\n  Pros: Clean URLs, semantically correct. Cons: Invisible in browser, harder to test manually. Best for: Internal APIs where clients are controlled. Query Parameter: /users?version=2\n  Pros: Easy to test in browser. Cons: Query params are for filtering, not versioning. Caching becomes complex. Best for: Avoiding this approach. Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes. AUTHENTICATION AND AUTHORIZATION\n--------------------------------- Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself."
+      ],
+      "ground_truth": "The layered system constraint means a client cannot tell whether it is connected directly to the end server or an intermediary such as a load balancer, CDN, or gateway. Each layer only sees the adjacent layer, enabling scalability and security through transparent proxies.",
+      "sources": [
+        {
+          "chunkId": "e1dc3bc6-6d3e-4f74-a264-2122191f27bf",
+          "documentId": "49799b01-92c6-48d9-af84-798b45868e6f",
+          "documentName": "api_design_principles.txt",
+          "score": 0.4211155
+        }
+      ],
+      "metrics": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0,
+        "llm_context_precision_with_reference": 0.0,
+        "context_recall": 0.0,
+        "answer_correctness": 0.025298899549935465
+      },
+      "error": null,
+      "duration_ms": 665
+    }
+  ],
+  "aggregate": {
+    "faithfulness": {
+      "mean": 0.36856180856180853,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "answer_relevancy": {
+      "mean": 0.4291089494352858,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "llm_context_precision_with_reference": {
+      "mean": 0.3333333333,
+      "min": 0.0,
+      "max": 0.9999999999
+    },
+    "context_recall": {
+      "mean": 0.18518518518518517,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "answer_correctness": {
+      "mean": 0.3087729344340181,
+      "min": 0.00602317082156312,
+      "max": 0.9999998296300084
+    }
+  }
+}

@@ -25,3 +25,6 @@ npm-debug.log*
 
 # Husky auto-generated
 .husky/_/
+
+# Python bytecode cache
+scripts/eval/__pycache__/
