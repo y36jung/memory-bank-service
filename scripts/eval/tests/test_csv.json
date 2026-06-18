@@ -1,0 +1,47 @@
+[
+  {
+    "id": "tc-09",
+    "group": 2,
+    "tags": ["structured-data", "csv", "travel"],
+    "question": "What is the visa requirement for a Canadian citizen travelling to Japan?",
+    "fixture_docs": ["world_destinations.csv"],
+    "ground_truth": "Canadian citizens do not require a visa to visit Japan for stays of up to 90 days.",
+    "notes": "Structured data query from CSV. Tests whether the CSV extractor correctly surfaces the Japan row and the model can answer precisely."
+  },
+  {
+    "id": "tc-20",
+    "group": 2,
+    "tags": ["structured-data", "csv", "travel", "enumeration", "all-rows"],
+    "question": "What are all the countries listed in the world destinations CSV?",
+    "fixture_docs": ["world_destinations.csv"],
+    "ground_truth": "The world destinations CSV lists five countries: Japan, France (Schengen), Australia, Mexico, and Canada.",
+    "notes": "Full-column enumeration test. Tests whether the retriever surfaces all rows of the Destination column rather than only the top-ranked chunk. Every country must appear in the answer — a partial list indicates retrieval saturation."
+  },
+  {
+    "id": "tc-21",
+    "group": 2,
+    "tags": ["structured-data", "csv", "travel", "multi-row", "column-values"],
+    "question": "What is the maximum number of days a Canadian citizen can stay in each country listed in the world destinations CSV?",
+    "fixture_docs": ["world_destinations.csv"],
+    "ground_truth": "According to the world destinations CSV, the maximum stays for Canadian citizens are: Japan — 90 days; France (Schengen) — 90 days within any 180-day period; Australia — 90 days per visit (ETA valid 12 months); Mexico — 180 days. Canada is the home country with no limit listed.",
+    "notes": "Multi-row column value query. Tests whether the model reads the Max Stay (Days) column for every row and presents all values without omission or fabrication. A missing row indicates the retriever did not surface that chunk."
+  },
+  {
+    "id": "tc-24",
+    "group": 2,
+    "tags": ["structured-data", "csv", "travel", "row-filter"],
+    "question": "Which countries in the world destinations CSV require a visa or travel authorization for Canadian citizens?",
+    "fixture_docs": ["world_destinations.csv"],
+    "ground_truth": "Australia requires an Electronic Travel Authority (ETA). Japan, France (Schengen), and Mexico do not require a visa for Canadian citizens. Canada is the home country.",
+    "notes": "Row-filter query over the Visa Required (Canadian Citizens) column. A correct answer names Australia (ETA) and correctly excludes Japan, France, and Mexico. Omitting Australia or mis-classifying a row indicates the retriever failed to surface all rows."
+  },
+  {
+    "id": "tc-25",
+    "group": 2,
+    "tags": ["structured-data", "csv", "travel", "cell-lookup"],
+    "question": "What are the popular entry points listed for Mexico in the world destinations CSV?",
+    "fixture_docs": ["world_destinations.csv"],
+    "ground_truth": "The popular entry points for Mexico listed in the world destinations CSV are Mexico City (MEX), Cancun (CUN), and Guadalajara (GDL).",
+    "notes": "Precise cell lookup: Mexico row x Popular Entry Points column. Hallucinating an airport not in the CSV is a faithfulness failure."
+  }
+]
