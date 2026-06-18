@@ -36,15 +36,6 @@
     "notes": "Partial information test. nutrition_guide.md gives active-adult RDA (1.4-2.2 g/kg) but explicitly states sedentary adult guidance is not provided. Model should acknowledge the gap rather than fill it in."
   },
   {
-    "id": "tc-05",
-    "group": 1,
-    "tags": ["conflict", "finance"],
-    "question": "How many months of expenses should an emergency fund cover?",
-    "fixture_docs": ["finance_basics.md", "finance_advanced.md"],
-    "ground_truth": null,
-    "notes": "Conflicting documents test. finance_basics.md says 3 months; finance_advanced.md says 6 months. Model should surface the conflict or hedge. Faithfulness expected 0.50-0.80."
-  },
-  {
     "id": "tc-06",
     "group": 1,
     "tags": ["high-overlap", "rest-api"],
@@ -61,24 +52,6 @@
     "fixture_docs": ["investment_basics.md", "retirement_planning.md"],
     "ground_truth": "Dollar-cost averaging (DCA) is an investment strategy where a fixed amount is invested at regular intervals regardless of price. For retirement investors this reduces the impact of market volatility: buying more units when prices are low and fewer when prices are high smooths the average cost basis over time, lowering the risk of making a large investment at a market peak.",
     "notes": "Cross-document synthesis, same format. Answer requires combining DCA mechanics from investment_basics.md with retirement context from retirement_planning.md."
-  },
-  {
-    "id": "tc-08",
-    "group": 2,
-    "tags": ["cross-doc", "mixed-format", "nutrition", "travel"],
-    "question": "What high-protein foods are suitable to pack for long-haul travel to Japan?",
-    "fixture_docs": ["nutrition_guide.md", "world_destinations.csv"],
-    "ground_truth": "High-protein travel-friendly foods include jerky, nuts, protein bars, and hard-boiled eggs. Japan does not restrict most food imports from Canada, but raw meats and fresh produce are prohibited. Pre-packaged, shelf-stable high-protein snacks such as jerky and protein bars are suitable for carry-on.",
-    "notes": "Cross-document mixed-format synthesis. Combines protein food list from nutrition_guide.md with Japan import restrictions from world_destinations.csv."
-  },
-  {
-    "id": "tc-09",
-    "group": 2,
-    "tags": ["structured-data", "csv", "travel"],
-    "question": "What is the visa requirement for a Canadian citizen travelling to Japan?",
-    "fixture_docs": ["world_destinations.csv"],
-    "ground_truth": "Canadian citizens do not require a visa to visit Japan for stays of up to 90 days.",
-    "notes": "Structured data query from CSV. Tests whether the CSV extractor correctly surfaces the Japan row and the model can answer precisely."
   },
   {
     "id": "tc-10",
@@ -117,15 +90,6 @@
     "notes": "Chunk boundary test. The three RRSP tax advantage facts straddle two consecutive chunks with 150-token overlap. Tests whether the retriever surfaces enough context to answer completely."
   },
   {
-    "id": "tc-18",
-    "group": 2,
-    "tags": ["out-of-scope", "negative"],
-    "question": "What is the current stock price of Apple Inc.?",
-    "fixture_docs": [],
-    "ground_truth": "I don't know based on the provided documents.",
-    "notes": "Out-of-scope query. No indexed document contains Apple stock price data. Model should say it doesn't know rather than hallucinate. Faithfulness expected >0.90."
-  },
-  {
     "id": "tc-19",
     "group": 2,
     "tags": ["re-index", "idempotency", "rest-api"],
@@ -133,5 +97,64 @@
     "fixture_docs": ["rest_api_guide.md"],
     "ground_truth": "The layered system constraint means a client cannot tell whether it is connected directly to the end server or an intermediary such as a load balancer, CDN, or gateway. Each layer only sees the adjacent layer, enabling scalability and security through transparent proxies.",
     "notes": "Re-index idempotency test. Run eval before and after deleting and re-uploading rest_api_guide.md. Scores should be identical within ±0.05."
+  },
+  {
+    "id": "tc-22",
+    "group": 1,
+    "tags": ["metadata", "filename"],
+    "question": "What is the name of the file that contains information about nutrition?",
+    "fixture_docs": ["nutrition_guide.md"],
+    "ground_truth": null,
+    "notes": "Filename metadata query. Tests whether the system surfaces the source document name (nutrition_guide.md) from document metadata rather than only from chunk content. The model should correctly identify the filename; fabricating a name is a faithfulness failure."
+  },
+  {
+    "id": "tc-23",
+    "group": 1,
+    "tags": ["metadata", "date-uploaded"],
+    "question": "When was the retirement planning document uploaded to the memory bank?",
+    "fixture_docs": ["retirement_planning.md"],
+    "ground_truth": null,
+    "notes": "Upload-date metadata query. Tests whether the system retrieves the per-document upload timestamp from document metadata. The model should report the actual indexed date or acknowledge uncertainty -- fabricating a date is a faithfulness failure."
+  },
+  {
+    "id": "tc-27",
+    "group": 1,
+    "tags": ["metadata", "file-size", "db-stored"],
+    "question": "How large is the nutrition guide file in bytes?",
+    "fixture_docs": ["nutrition_guide.md"],
+    "ground_truth": null,
+    "notes": "File-size metadata query. sizeBytes is stored in documents.size_bytes but is not embedded in any chunk. The model should acknowledge it cannot determine file size from available context rather than guessing. Like tc-26, this intentionally documents a system capability gap -- low faithfulness/relevancy scores are expected."
+  },
+  {
+    "id": "tc-28",
+    "group": 2,
+    "tags": ["metadata", "content-derived", "document-title", "rest-api"],
+    "question": "What is the full title of the REST API document as it appears at the top of the document?",
+    "fixture_docs": ["rest_api_guide.md"],
+    "ground_truth": "REST API Design Guide",
+    "notes": "Content-derived title metadata. The H1 header '# REST API Design Guide' is the first line of rest_api_guide.md and lands in the first chunk. Tests whether the model reads and reports the document's own title rather than paraphrasing or hallucinating."
+  },
+  {
+    "id": "tc-29",
+    "group": 2,
+    "tags": ["metadata", "content-derived", "citations", "nutrition"],
+    "question": "What health or scientific authorities are referenced in the nutrition guide?",
+    "fixture_docs": ["nutrition_guide.md"],
+    "ground_truth": "The nutrition guide references the World Health Organization (WHO), the Dietary Reference Intakes (DRI) published by the National Academies of Sciences, Engineering, and Medicine, and Health Canada's Canadian Nutrient File.",
+    "notes": "Content-embedded authority metadata. The Introduction section of nutrition_guide.md explicitly names these three sources. Tests accurate reporting of cited authorities from document content; hallucinating additional organisations is a faithfulness failure."
+  },
+  {
+    "id": "tc-30",
+    "group": 1,
+    "tags": ["metadata", "content-derived", "topic-classification", "cross-doc", "inventory"],
+    "question": "Which documents in the memory bank are related to personal finance or investment?",
+    "fixture_docs": [
+      "finance_basics.md",
+      "finance_advanced.md",
+      "investment_basics.md",
+      "retirement_planning.md"
+    ],
+    "ground_truth": null,
+    "notes": "Cross-document topic classification query. Tests whether the system enumerates documents by topic using document names and chunk content. Expected to name finance_basics.md, finance_advanced.md, investment_basics.md, and retirement_planning.md. A partial list indicates retrieval saturation across documents; documents outside those four should not appear."
   }
 ]

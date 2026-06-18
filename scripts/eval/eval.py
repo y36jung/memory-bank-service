@@ -65,7 +65,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     Returns:
         argparse.ArgumentParser: Parser configured with --base-url, --db-url,
-            --dataset, --output, and --tags flags.
+            --tests-dir, --dataset, --output, and --tags flags.
     """
     parser = argparse.ArgumentParser(
         description="RAGAS evaluation harness for Memory Bank"
@@ -80,10 +80,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="PostgreSQL connection URL (default: DATABASE_URL env var)",
     )
-    parser.add_argument(
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument(
+        "--tests-dir",
+        default=None,
+        help="Directory of test_*.json files to discover and run (default: ./tests/)",
+    )
+    source_group.add_argument(
         "--dataset",
-        default=str(Path(__file__).parent / "dataset.json"),
-        help="Path to the dataset JSON file",
+        default=None,
+        help="Path to a single dataset JSON file (legacy single-file mode)",
     )
     parser.add_argument(
         "--output",
@@ -141,6 +147,50 @@ def load_dataset(path: Path, tag_filter: list[str]) -> list[TestCase]:
         cases = [tc for tc in cases if any(t in tag_set for t in tc.tags)]
 
     return cases
+
+
+def load_test_suite(tests_dir: Path, tag_filter: list[str]) -> list[TestCase]:
+    """Discover all test_*.json files in tests_dir and merge them into one list.
+
+    Args:
+        tests_dir (Path): Directory containing test_*.json files.
+        tag_filter (list[str]): If non-empty, keep only cases whose tags
+            overlap this set (applied after merging all files).
+
+    Returns:
+        list[TestCase]: Merged and optionally filtered test cases.
+
+    Raises:
+        FileNotFoundError: If tests_dir does not exist or contains no test_*.json files.
+        ValueError: If the same test case ID appears in more than one file.
+    """
+    if not tests_dir.exists():
+        raise FileNotFoundError(f"Tests directory not found: {tests_dir}")
+
+    files = sorted(tests_dir.glob("test_*.json"))
+    if not files:
+        raise FileNotFoundError(f"No test_*.json files found in {tests_dir}")
+
+    all_cases: list[TestCase] = []
+    seen_ids: dict[str, Path] = {}
+
+    for f in files:
+        cases = load_dataset(f, tag_filter=[])
+        for tc in cases:
+            if tc.id in seen_ids:
+                raise ValueError(
+                    f"Duplicate test case ID '{tc.id}' in {f} (already defined in {seen_ids[tc.id]})"
+                )
+            seen_ids[tc.id] = f
+        all_cases.extend(cases)
+
+    print(f"Loaded {len(all_cases)} case(s) from {len(files)} file(s): {', '.join(f.name for f in files)}")
+
+    if tag_filter:
+        tag_set = set(tag_filter)
+        all_cases = [tc for tc in all_cases if any(t in tag_set for t in tc.tags)]
+
+    return all_cases
 
 
 def create_session(base_url: str, client: httpx.Client) -> str:
@@ -333,7 +383,7 @@ def build_ragas_llm_and_embeddings(openai_api_key: str):
             wrapper and text-embedding-3-large embeddings wrapper.
     """
     llm = LangchainLLMWrapper(
-        ChatOpenAI(model="gpt-4o", api_key=openai_api_key, temperature=0)
+        ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key, temperature=0)
     )
     embeddings = LangchainEmbeddingsWrapper(
         OpenAIEmbeddings(model="text-embedding-3-large", api_key=openai_api_key)
@@ -590,11 +640,19 @@ def main() -> None:
     console.print("[bold cyan]Building RAGAS LLM and embeddings...[/bold cyan]")
     llm, embeddings = build_ragas_llm_and_embeddings(openai_api_key)
 
-    dataset_path = Path(args.dataset)
     tag_filter = args.tags or []
 
-    console.print(f"[bold cyan]Loading dataset from {dataset_path}...[/bold cyan]")
-    test_cases = load_dataset(dataset_path, tag_filter)
+    if args.dataset:
+        dataset_path = Path(args.dataset)
+        console.print(f"[bold cyan]Loading dataset from {dataset_path}...[/bold cyan]")
+        test_cases = load_dataset(dataset_path, tag_filter)
+        source_label = "/" + str(dataset_path.resolve().relative_to(Path(__file__).resolve().parents[2]))
+    else:
+        tests_dir = Path(args.tests_dir) if args.tests_dir else Path(__file__).parent / "tests"
+        console.print(f"[bold cyan]Loading test suite from {tests_dir}/...[/bold cyan]")
+        test_cases = load_test_suite(tests_dir, tag_filter)
+        source_label = "/" + str(tests_dir.resolve().relative_to(Path(__file__).resolve().parents[2]))
+
     console.print(f"Loaded [bold]{len(test_cases)}[/bold] test case(s)")
 
     run_at = datetime.now(timezone.utc).isoformat()
@@ -677,7 +735,7 @@ def main() -> None:
     metadata = {
         "run_at": run_at,
         "base_url": args.base_url,
-        "dataset": "/" + str(dataset_path.resolve().relative_to(Path(__file__).resolve().parents[2])),
+        "dataset": source_label,
     }
     write_output_json(combined, output_path, metadata)
 
