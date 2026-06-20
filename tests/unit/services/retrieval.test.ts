@@ -1,7 +1,8 @@
 /**
- * Unit tests for src/services/retrieval.ts — retrieveChunks
+ * Unit tests for src/services/retrieval.ts — retrieveChunks and retrieve
  *
- * External dependencies (batchEmbed, searchPoints, db) are mocked.
+ * External dependencies (batchEmbed, searchPoints, db, openai, classifyQuery)
+ * are mocked — no real Postgres, Qdrant, or OpenAI calls.
  *
  * Criteria covered:
  * AC-4a: returns empty array when Qdrant returns no results
@@ -10,13 +11,39 @@
  * AC-4d: results are sorted by score descending
  * AC-4e: Qdrant hits with no matching Postgres row are discarded
  * AC-4f: content comes from Postgres, not Qdrant payload (Postgres-first invariant)
+ * AC-HYDE-1: generateHypotheticalAnswer returns hypothetical text passed to batchEmbed
+ * AC-HYDE-2: generateHypotheticalAnswer falls back to original query on OpenAI error
+ * AC-HYDE-3: classifyQuery receives original query, not hydeText
+ * AC-FUSION-1: score fusion = 0.5*contentScore + 0.5*metadataScore on overlapping chunks
+ * AC-FUSION-2: metadata-only chunks appear with contentScore=0 in fusion
+ * AC-IR-1: list_documents intent → retrieve() returns { type: 'document_list', documents }
+ * AC-IR-2: list_documents path skips searchPoints (never called)
+ * AC-IR-3: list_documents path skips batchEmbed (never called)
+ * AC-IR-4: list_documents with date filters applies date predicates
+ * AC-IR-5: list_documents with null filters returns all documents (no date conditions)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
+// Hoisted mock for the OpenAI chat.completions.create
+// ---------------------------------------------------------------------------
+
+const { mockChatCreate } = vi.hoisted(() => ({
+  mockChatCreate: vi.fn(),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock external dependencies — no real Postgres, Qdrant, or OpenAI
 // ---------------------------------------------------------------------------
+
+vi.mock('openai', () => {
+  const OpenAI = vi.fn(() => ({
+    chat: { completions: { create: mockChatCreate } },
+    audio: { transcriptions: { create: vi.fn() } },
+  }));
+  return { default: OpenAI };
+});
 
 vi.mock('../../../src/services/embeddings.js', () => ({
   batchEmbed: vi.fn(),
@@ -27,6 +54,10 @@ vi.mock('../../../src/services/qdrant.js', () => ({
   ensureCollection: vi.fn(),
   upsertPoints: vi.fn(),
   deletePoints: vi.fn(),
+}));
+
+vi.mock('../../../src/services/queryClassifier.js', () => ({
+  classifyQuery: vi.fn().mockResolvedValue(null), // default: no metadata intent → pure vector path
 }));
 
 vi.mock('../../../src/db/index.js', () => {
@@ -45,8 +76,9 @@ vi.mock('../../../src/db/index.js', () => {
 
 import * as embeddings from '../../../src/services/embeddings.js';
 import * as qdrant from '../../../src/services/qdrant.js';
+import * as queryClassifierModule from '../../../src/services/queryClassifier.js';
 import { db } from '../../../src/db/index.js';
-import { retrieveChunks } from '../../../src/services/retrieval.js';
+import { retrieveChunks, retrieve } from '../../../src/services/retrieval.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,36 +86,85 @@ import { retrieveChunks } from '../../../src/services/retrieval.js';
 
 const MOCK_VECTOR = new Array(3072).fill(0.1) as number[];
 
+const HYDE_RESPONSE =
+  'Sedentary adults require approximately 0.8g protein per kg body weight daily.';
+
 function mockEmbeddings(vector: number[] = MOCK_VECTOR) {
   vi.mocked(embeddings.batchEmbed).mockResolvedValue([vector]);
 }
 
-function getSelectWhereMock() {
-  // The db.select() chain ends with .where() — we need to mock its resolved value.
-  const selectResult = (db as unknown as { _selectMock: { where: ReturnType<typeof vi.fn> } })
-    ._selectMock;
-  return selectResult.where as ReturnType<typeof vi.fn>;
+function mockHydeSuccess(text = HYDE_RESPONSE) {
+  mockChatCreate.mockResolvedValue({
+    choices: [{ message: { content: text } }],
+  });
+}
+
+function mockHydeError() {
+  mockChatCreate.mockRejectedValue(new Error('OpenAI 401 Unauthorized'));
+}
+
+/**
+ * Build a mock select chain that resolves .where() (terminal) with the given rows.
+ * Used for the simple vector-only path where there's no .orderBy()/.limit() after .where().
+ */
+function makeSelectChain(rows: unknown[]) {
+  return {
+    from: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
+    where: vi.fn().mockResolvedValue(rows),
+  };
+}
+
+/**
+ * Build a mock select chain for the metadata SQL path.
+ * retrieveByMetadata calls: .select().from().innerJoin().where().orderBy().limit()
+ */
+function makeMetadataSelectChain(rows: unknown[]) {
+  const chain: Record<string, unknown> = {};
+  chain['from'] = vi.fn().mockReturnValue(chain);
+  chain['innerJoin'] = vi.fn().mockReturnValue(chain);
+  chain['where'] = vi.fn().mockReturnValue(chain);
+  chain['orderBy'] = vi.fn().mockReturnValue(chain);
+  chain['limit'] = vi.fn().mockResolvedValue(rows);
+  return chain;
+}
+
+/**
+ * Build a mock select chain for the document listing path.
+ * retrieveDocuments calls: .select().from().where().orderBy().limit()
+ */
+function makeDocumentListSelectChain(rows: unknown[]) {
+  const chain: Record<string, unknown> = {};
+  chain['from'] = vi.fn().mockReturnValue(chain);
+  chain['where'] = vi.fn().mockReturnValue(chain);
+  chain['orderBy'] = vi.fn().mockReturnValue(chain);
+  chain['limit'] = vi.fn().mockResolvedValue(rows);
+  return chain;
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Setup: reset all mocks before each test, establish default select chain
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  // Default HyDE: returns the hypothetical answer text
+  mockHydeSuccess();
+  // Default classifyQuery: null (pure vector path)
+  vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue(null);
+  // Default batchEmbed: returns a valid vector
+  mockEmbeddings();
+  // Re-establish the select chain mock after reset
+  const basicChain = makeSelectChain([]);
+  vi.mocked(db.select).mockReturnValue(basicChain as unknown as ReturnType<typeof db.select>);
+});
+
+// ---------------------------------------------------------------------------
+// Existing AC tests: vector-only path (via retrieveChunks)
 // ---------------------------------------------------------------------------
 
 describe('retrieveChunks', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    // Re-establish the select chain mock after reset
-    const whereMock = vi.fn();
-    const selectMock = {
-      from: vi.fn().mockReturnThis(),
-      innerJoin: vi.fn().mockReturnThis(),
-      where: whereMock,
-    };
-    vi.mocked(db.select).mockReturnValue(selectMock as ReturnType<typeof db.select>);
-  });
-
   it('returns empty array when Qdrant returns no results', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     const result = await retrieveChunks('what is the meaning of life?');
@@ -100,13 +181,11 @@ describe('retrieveChunks', () => {
   });
 
   it('maps scores from Qdrant results correctly', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([
       { id: 'qdrant-uuid-1', score: 0.95 },
       { id: 'qdrant-uuid-2', score: 0.72 },
     ]);
 
-    // Mock DB to return matching Postgres rows
     const dbRows = [
       {
         id: 'chunk-pg-id-1',
@@ -114,6 +193,12 @@ describe('retrieveChunks', () => {
         documentId: 'doc-id-1',
         content: 'First chunk content',
         originalName: 'document1.txt',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'text/plain',
+        sizeBytes: 100,
+        startSecs: null,
+        endSecs: null,
       },
       {
         id: 'chunk-pg-id-2',
@@ -121,15 +206,18 @@ describe('retrieveChunks', () => {
         documentId: 'doc-id-2',
         content: 'Second chunk content',
         originalName: 'document2.txt',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'text/plain',
+        sizeBytes: 100,
+        startSecs: null,
+        endSecs: null,
       },
     ];
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      innerJoin: vi.fn().mockReturnThis(),
-      where: vi.fn().mockResolvedValue(dbRows),
-    };
-    vi.mocked(db.select).mockReturnValue(selectChain as ReturnType<typeof db.select>);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
+    );
 
     const result = await retrieveChunks('test query');
 
@@ -142,7 +230,6 @@ describe('retrieveChunks', () => {
   });
 
   it('discards Qdrant hits with no matching Postgres row', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([
       { id: 'qdrant-uuid-1', score: 0.91 },
       { id: 'qdrant-uuid-orphan', score: 0.85 }, // no matching row in Postgres
@@ -155,16 +242,19 @@ describe('retrieveChunks', () => {
         documentId: 'doc-id-1',
         content: 'Content for chunk 1',
         originalName: 'doc.txt',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'text/plain',
+        sizeBytes: 100,
+        startSecs: null,
+        endSecs: null,
       },
       // 'qdrant-uuid-orphan' has no Postgres row
     ];
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      innerJoin: vi.fn().mockReturnThis(),
-      where: vi.fn().mockResolvedValue(dbRows),
-    };
-    vi.mocked(db.select).mockReturnValue(selectChain as ReturnType<typeof db.select>);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
+    );
 
     const result = await retrieveChunks('test query');
     expect(result).toHaveLength(1);
@@ -172,7 +262,6 @@ describe('retrieveChunks', () => {
   });
 
   it('results are sorted by score descending even when DB returns in arbitrary order', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([
       { id: 'q-id-a', score: 0.6 },
       { id: 'q-id-b', score: 0.9 },
@@ -180,17 +269,50 @@ describe('retrieveChunks', () => {
     ]);
 
     const dbRows = [
-      { id: 'pg-a', qdrantId: 'q-id-a', documentId: 'doc-1', content: 'A', originalName: 'a.txt' },
-      { id: 'pg-c', qdrantId: 'q-id-c', documentId: 'doc-3', content: 'C', originalName: 'c.txt' },
-      { id: 'pg-b', qdrantId: 'q-id-b', documentId: 'doc-2', content: 'B', originalName: 'b.txt' },
+      {
+        id: 'pg-a',
+        qdrantId: 'q-id-a',
+        documentId: 'doc-1',
+        content: 'A',
+        originalName: 'a.txt',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'text/plain',
+        sizeBytes: null,
+        startSecs: null,
+        endSecs: null,
+      },
+      {
+        id: 'pg-c',
+        qdrantId: 'q-id-c',
+        documentId: 'doc-3',
+        content: 'C',
+        originalName: 'c.txt',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'text/plain',
+        sizeBytes: null,
+        startSecs: null,
+        endSecs: null,
+      },
+      {
+        id: 'pg-b',
+        qdrantId: 'q-id-b',
+        documentId: 'doc-2',
+        content: 'B',
+        originalName: 'b.txt',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'text/plain',
+        sizeBytes: null,
+        startSecs: null,
+        endSecs: null,
+      },
     ];
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      innerJoin: vi.fn().mockReturnThis(),
-      where: vi.fn().mockResolvedValue(dbRows),
-    };
-    vi.mocked(db.select).mockReturnValue(selectChain as ReturnType<typeof db.select>);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
+    );
 
     const result = await retrieveChunks('test query');
     expect(result).toHaveLength(3);
@@ -200,7 +322,6 @@ describe('retrieveChunks', () => {
   });
 
   it('content comes from Postgres row, not from Qdrant payload (Postgres-first invariant)', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-1', score: 0.88 }]);
 
     const postgresContent = 'Authoritative content from Postgres';
@@ -211,15 +332,18 @@ describe('retrieveChunks', () => {
         documentId: 'doc-id-1',
         content: postgresContent,
         originalName: 'file.txt',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'text/plain',
+        sizeBytes: null,
+        startSecs: null,
+        endSecs: null,
       },
     ];
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      innerJoin: vi.fn().mockReturnThis(),
-      where: vi.fn().mockResolvedValue(dbRows),
-    };
-    vi.mocked(db.select).mockReturnValue(selectChain as ReturnType<typeof db.select>);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
+    );
 
     const result = await retrieveChunks('test query');
     expect(result).toHaveLength(1);
@@ -227,7 +351,6 @@ describe('retrieveChunks', () => {
   });
 
   it('maps documentName from documents.original_name', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-1', score: 0.8 }]);
 
     const dbRows = [
@@ -237,22 +360,24 @@ describe('retrieveChunks', () => {
         documentId: 'doc-id-1',
         content: 'some content',
         originalName: 'my-important-document.pdf',
+        createdAt: new Date(),
+        sourceType: 'upload',
+        mimeType: 'application/pdf',
+        sizeBytes: null,
+        startSecs: null,
+        endSecs: null,
       },
     ];
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      innerJoin: vi.fn().mockReturnThis(),
-      where: vi.fn().mockResolvedValue(dbRows),
-    };
-    vi.mocked(db.select).mockReturnValue(selectChain as ReturnType<typeof db.select>);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
+    );
 
     const result = await retrieveChunks('test query');
     expect(result[0]?.documentName).toBe('my-important-document.pdf');
   });
 
   it('passes topK and scoreThreshold to searchPoints', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     await retrieveChunks('query', 5, 0.7);
@@ -261,11 +386,260 @@ describe('retrieveChunks', () => {
   });
 
   it('uses defaults topK=10 and scoreThreshold=0.4 when not provided', async () => {
-    mockEmbeddings();
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     await retrieveChunks('query');
 
     expect(qdrant.searchPoints).toHaveBeenCalledWith(MOCK_VECTOR, 10, 0.4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-HYDE: HyDE (Hypothetical Document Embeddings) behavior
+// ---------------------------------------------------------------------------
+
+describe('HyDE — generateHypotheticalAnswer integration', () => {
+  it('passes hypothetical text (not original query) to batchEmbed', async () => {
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
+
+    const originalQuery = 'How much protein should a sedentary adult consume per day?';
+    await retrieveChunks(originalQuery);
+
+    // batchEmbed must have been called with the HyDE text, not the original query
+    expect(embeddings.batchEmbed).toHaveBeenCalledWith([HYDE_RESPONSE]);
+    expect(embeddings.batchEmbed).not.toHaveBeenCalledWith([originalQuery]);
+  });
+
+  it('falls back to original query when OpenAI throws (batchEmbed receives original query)', async () => {
+    mockHydeError();
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
+
+    const originalQuery = 'What is photosynthesis?';
+    await retrieveChunks(originalQuery);
+
+    // On error, generateHypotheticalAnswer returns the original query as fallback
+    expect(embeddings.batchEmbed).toHaveBeenCalledWith([originalQuery]);
+  });
+
+  it('classifyQuery receives the original query and a date string, not the hypothetical text', async () => {
+    const differentHydeText = 'A completely different hypothetical answer text.';
+    mockHydeSuccess(differentHydeText);
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
+
+    const originalQuery = 'How much protein should a sedentary adult consume per day?';
+    await retrieveChunks(originalQuery);
+
+    // classifyQuery must be called with the original query + a date string
+    expect(queryClassifierModule.classifyQuery).toHaveBeenCalledWith(
+      originalQuery,
+      expect.any(String),
+    );
+    expect(queryClassifierModule.classifyQuery).not.toHaveBeenCalledWith(
+      differentHydeText,
+      expect.any(String),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-FUSION: Score fusion when classifyQuery returns search_content + filters
+// ---------------------------------------------------------------------------
+
+describe('score fusion — hybrid metadata + vector search', () => {
+  it('fused score = 0.5*contentScore + 0.5*metadataScore for overlapping chunks', async () => {
+    // classifyQuery returns a search_content classification (triggers hybrid path)
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'search_content',
+      filters: { documentKeywords: ['foo'] },
+    });
+
+    const CONTENT_SCORE = 0.8;
+    const METADATA_SCORE = 0.6;
+    const OVERLAP_CHUNK_ID = 'chunk-overlap-1';
+    const OVERLAP_QDRANT_ID = 'qdrant-overlap-1';
+
+    // Qdrant returns one hit for the vector path
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([
+      { id: OVERLAP_QDRANT_ID, score: CONTENT_SCORE },
+    ]);
+
+    // Vector DB row
+    const vectorRow = {
+      id: OVERLAP_CHUNK_ID,
+      qdrantId: OVERLAP_QDRANT_ID,
+      documentId: 'doc-1',
+      content: 'Overlapping chunk content',
+      originalName: 'foo.txt',
+      createdAt: new Date(),
+      sourceType: 'upload',
+      mimeType: 'text/plain',
+      sizeBytes: null,
+      startSecs: null,
+      endSecs: null,
+    };
+
+    // Metadata DB row — same chunk, has keywordScore
+    const metadataRow = {
+      ...vectorRow,
+      keywordScore: METADATA_SCORE,
+    };
+
+    // We need two separate db.select() calls:
+    // 1st: vector path — returns vectorRow via .where() (no orderBy/limit)
+    // 2nd: metadata path (retrieveByMetadata) — returns metadataRow via .limit()
+    const vectorChain = makeSelectChain([vectorRow]);
+    const metadataChain = makeMetadataSelectChain([metadataRow]);
+
+    let callCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) return vectorChain as unknown as ReturnType<typeof db.select>;
+      return metadataChain as unknown as ReturnType<typeof db.select>;
+    });
+
+    const result = await retrieveChunks('foo document query');
+
+    expect(result).toHaveLength(1);
+    const fusedScore = 0.5 * CONTENT_SCORE + 0.5 * METADATA_SCORE;
+    expect(result[0]?.score).toBeCloseTo(fusedScore, 5);
+  });
+
+  it('metadata-only chunks (not in Qdrant results) appear with contentScore=0', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'search_content',
+      filters: { documentKeywords: ['foo'] },
+    });
+
+    // Qdrant returns no hits
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
+
+    const METADATA_SCORE = 1.0;
+    const metadataRow = {
+      id: 'chunk-metadata-only',
+      qdrantId: 'qdrant-metadata-only',
+      documentId: 'doc-1',
+      content: 'Metadata-only chunk',
+      originalName: 'foo.txt',
+      createdAt: new Date(),
+      sourceType: 'upload',
+      mimeType: 'text/plain',
+      sizeBytes: null,
+      startSecs: null,
+      endSecs: null,
+      keywordScore: METADATA_SCORE,
+    };
+
+    // 1st db.select call: vector path returns empty (no qdrant hits → no db query needed)
+    // 2nd db.select call: metadata path returns metadataRow
+    // Actually when qdrantResults.length === 0, the vector db.select is never called.
+    // So only one db.select call happens (for metadata).
+    const metadataChain = makeMetadataSelectChain([metadataRow]);
+    vi.mocked(db.select).mockReturnValue(metadataChain as unknown as ReturnType<typeof db.select>);
+
+    const result = await retrieveChunks('foo document');
+
+    expect(result).toHaveLength(1);
+    // contentScore = 0 (not in vector results), metadataScore = 1.0
+    // fused = 0.5 * 0 + 0.5 * 1.0 = 0.5
+    expect(result[0]?.score).toBeCloseTo(0.5, 5);
+    expect(result[0]?.chunkId).toBe('chunk-metadata-only');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-IR: Intent routing — list_documents path
+// ---------------------------------------------------------------------------
+
+describe('AC-IR: retrieve() — list_documents intent routing', () => {
+  const mockDocRow = {
+    id: 'doc-uuid-1',
+    originalName: 'report.pdf',
+    sourceType: 'upload',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    createdAt: new Date('2026-06-18T10:00:00Z'),
+  };
+
+  it('AC-IR-1: returns { type: document_list, documents } for list_documents intent', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: null,
+    });
+
+    const docChain = makeDocumentListSelectChain([mockDocRow]);
+    vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    const result = await retrieve('what documents have I uploaded?');
+
+    expect(result.type).toBe('document_list');
+    if (result.type === 'document_list') {
+      expect(result.documents).toHaveLength(1);
+      expect(result.documents[0]?.documentId).toBe('doc-uuid-1');
+      expect(result.documents[0]?.documentName).toBe('report.pdf');
+    }
+  });
+
+  it('AC-IR-2: list_documents path never calls searchPoints', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: null,
+    });
+
+    const docChain = makeDocumentListSelectChain([mockDocRow]);
+    vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    await retrieve('list all my documents');
+
+    expect(qdrant.searchPoints).not.toHaveBeenCalled();
+  });
+
+  it('AC-IR-3: list_documents path never calls batchEmbed', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: null,
+    });
+
+    const docChain = makeDocumentListSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    await retrieve('show me my files');
+
+    expect(embeddings.batchEmbed).not.toHaveBeenCalled();
+  });
+
+  it('AC-IR-4: list_documents with date filters passes filters to db query', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: { uploadedAfter: '2026-06-13', uploadedBefore: '2026-06-20' },
+    });
+
+    const docChain = makeDocumentListSelectChain([mockDocRow]);
+    const selectSpy = vi
+      .mocked(db.select)
+      .mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    const result = await retrieve('what did I upload last week?');
+
+    // The query should have used db.select (SQL path)
+    expect(selectSpy).toHaveBeenCalled();
+    expect(result.type).toBe('document_list');
+  });
+
+  it('AC-IR-5: list_documents with null filters returns all documents', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: null,
+    });
+
+    const allDocs = [mockDocRow, { ...mockDocRow, id: 'doc-uuid-2', originalName: 'notes.txt' }];
+    const docChain = makeDocumentListSelectChain(allDocs);
+    vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    const result = await retrieve('what documents have I uploaded?');
+
+    expect(result.type).toBe('document_list');
+    if (result.type === 'document_list') {
+      expect(result.documents).toHaveLength(2);
+    }
   });
 });

@@ -299,7 +299,7 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
 3. Search Qdrant
    collection: 'memory_bank'
    top_k: 10
-   score_threshold: 0.5  (configurable)
+   score_threshold: 0.4  (configurable)
    with_payload: false   (Qdrant returns only vector IDs and scores — no content)
 
 4. Fetch chunk text from Postgres

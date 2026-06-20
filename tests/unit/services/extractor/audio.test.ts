@@ -160,15 +160,15 @@ describe('AC-1a: Audio < 25 MB → single Whisper transcription call', () => {
   it('returns Whisper transcript for a small file (single call)', async () => {
     const smallSize = WHISPER_LIMIT - 1; // just under 25 MB
     mockStatSync.mockReturnValue({ size: smallSize });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Hello world transcript' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Hello world transcript', segments: [] });
 
     const result = await extractAudio('audio/small.mp3');
-    expect(result).toBe('Hello world transcript');
+    expect(result.text).toBe('Hello world transcript');
   });
 
   it('calls Whisper API exactly once for a small file', async () => {
     mockStatSync.mockReturnValue({ size: 1024 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Short audio' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Short audio', segments: [] });
 
     await extractAudio('audio/tiny.mp3');
     expect(mockTranscriptionsCreate).toHaveBeenCalledTimes(1);
@@ -176,7 +176,7 @@ describe('AC-1a: Audio < 25 MB → single Whisper transcription call', () => {
 
   it('calls Whisper with model whisper-1', async () => {
     mockStatSync.mockReturnValue({ size: 1024 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Whisper' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Whisper', segments: [] });
 
     await extractAudio('audio/file.mp3');
     const callArgs = mockTranscriptionsCreate.mock.calls[0][0];
@@ -185,7 +185,7 @@ describe('AC-1a: Audio < 25 MB → single Whisper transcription call', () => {
 
   it('does NOT invoke ffmpeg split for a small file', async () => {
     mockStatSync.mockReturnValue({ size: 1000 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'No split needed' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'No split needed', segments: [] });
 
     await extractAudio('audio/small.wav');
     expect(ffmpeg).not.toHaveBeenCalled();
@@ -193,10 +193,10 @@ describe('AC-1a: Audio < 25 MB → single Whisper transcription call', () => {
 
   it('handles file at exactly 25 MB (≤ limit means no split)', async () => {
     mockStatSync.mockReturnValue({ size: WHISPER_LIMIT });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Exactly 25MB' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Exactly 25MB', segments: [] });
 
     const result = await extractAudio('audio/exact25.mp3');
-    expect(result).toBe('Exactly 25MB');
+    expect(result.text).toBe('Exactly 25MB');
     expect(ffmpeg).not.toHaveBeenCalled();
   });
 });
@@ -216,21 +216,21 @@ describe('AC-1b: Audio > 25 MB → split with ffmpeg then transcribe segments', 
     mockStatSync.mockReturnValue({ size: WHISPER_LIMIT + 1 });
     mockReaddirSync.mockReturnValue(['seg-0000.wav', 'seg-0001.wav']);
     mockTranscriptionsCreate
-      .mockResolvedValueOnce({ text: 'Part one' })
-      .mockResolvedValueOnce({ text: 'Part two' });
+      .mockResolvedValueOnce({ text: 'Part one', segments: [] })
+      .mockResolvedValueOnce({ text: 'Part two', segments: [] });
 
     const result = await extractAudio('audio/large.mp3');
     expect(ffmpeg).toHaveBeenCalledTimes(1);
-    expect(result).toBe('Part one Part two');
+    expect(result.text).toBe('Part one Part two');
   });
 
   it('calls Whisper once per segment', async () => {
     mockStatSync.mockReturnValue({ size: WHISPER_LIMIT + 100 });
     mockReaddirSync.mockReturnValue(['seg-0000.wav', 'seg-0001.wav', 'seg-0002.wav']);
     mockTranscriptionsCreate
-      .mockResolvedValueOnce({ text: 'Segment A' })
-      .mockResolvedValueOnce({ text: 'Segment B' })
-      .mockResolvedValueOnce({ text: 'Segment C' });
+      .mockResolvedValueOnce({ text: 'Segment A', segments: [] })
+      .mockResolvedValueOnce({ text: 'Segment B', segments: [] })
+      .mockResolvedValueOnce({ text: 'Segment C', segments: [] });
 
     await extractAudio('audio/big.wav');
     expect(mockTranscriptionsCreate).toHaveBeenCalledTimes(3);
@@ -240,17 +240,17 @@ describe('AC-1b: Audio > 25 MB → split with ffmpeg then transcribe segments', 
     mockStatSync.mockReturnValue({ size: WHISPER_LIMIT * 2 });
     mockReaddirSync.mockReturnValue(['seg-0000.wav', 'seg-0001.wav']);
     mockTranscriptionsCreate
-      .mockResolvedValueOnce({ text: 'Alpha' })
-      .mockResolvedValueOnce({ text: 'Beta' });
+      .mockResolvedValueOnce({ text: 'Alpha', segments: [] })
+      .mockResolvedValueOnce({ text: 'Beta', segments: [] });
 
     const result = await extractAudio('audio/huge.mp3');
-    expect(result).toBe('Alpha Beta');
+    expect(result.text).toBe('Alpha Beta');
   });
 
   it('passes segment_size flag to ffmpeg when splitting', async () => {
     mockStatSync.mockReturnValue({ size: WHISPER_LIMIT + 100 });
     mockReaddirSync.mockReturnValue(['seg-0000.wav']);
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Done' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Done', segments: [] });
 
     await extractAudio('audio/oversized.mp3');
 
@@ -284,7 +284,7 @@ describe('AC-1c: Audio file extension detected via file-type', () => {
     mockCreateWriteStream.mockReturnValue({ write: vi.fn(), end: vi.fn() });
     mockCreateReadStream.mockReturnValue(makeReadable('audio'));
     mockStatSync.mockReturnValue({ size: 100 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'WAV transcript' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'WAV transcript', segments: [] });
 
     await extractAudio('audio/file.wav');
 
@@ -303,7 +303,7 @@ describe('AC-1c: Audio file extension detected via file-type', () => {
     mockCreateWriteStream.mockReturnValue({ write: vi.fn(), end: vi.fn() });
     mockCreateReadStream.mockReturnValue(makeReadable('audio'));
     mockStatSync.mockReturnValue({ size: 100 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Fallback mp3' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Fallback mp3', segments: [] });
 
     await extractAudio('audio/mystery.bin');
 
@@ -324,7 +324,7 @@ describe('AC-6 (audio): onProgress callback stages', () => {
 
   it('calls onProgress("downloading", 5) before download for small file', async () => {
     mockStatSync.mockReturnValue({ size: 1024 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'OK' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'OK', segments: [] });
 
     const stages: Array<[string, number]> = [];
     const onProgress = vi.fn().mockImplementation(async (stage: string, pct: number) => {
@@ -338,7 +338,7 @@ describe('AC-6 (audio): onProgress callback stages', () => {
 
   it('calls onProgress("transcribing", ...) for small file path', async () => {
     mockStatSync.mockReturnValue({ size: 1024 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'OK' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'OK', segments: [] });
 
     const stages: Array<[string, number]> = [];
     const onProgress = vi.fn().mockImplementation(async (stage: string, pct: number) => {
@@ -351,7 +351,7 @@ describe('AC-6 (audio): onProgress callback stages', () => {
 
   it('calls onProgress("done", 100) at the end for small file', async () => {
     mockStatSync.mockReturnValue({ size: 1024 });
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Done' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Done', segments: [] });
 
     const stages: Array<[string, number]> = [];
     const onProgress = vi.fn().mockImplementation(async (stage: string, pct: number) => {
@@ -366,7 +366,7 @@ describe('AC-6 (audio): onProgress callback stages', () => {
     configureFfmpegEndCallback();
     mockStatSync.mockReturnValue({ size: WHISPER_LIMIT + 1 });
     mockReaddirSync.mockReturnValue(['seg-0000.wav']);
-    mockTranscriptionsCreate.mockResolvedValue({ text: 'Done' });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Done', segments: [] });
 
     const stages: Array<[string, number]> = [];
     const onProgress = vi.fn().mockImplementation(async (stage: string, pct: number) => {

@@ -84,20 +84,26 @@ describe('AC-5: S3 size pre-check', () => {
     vi.mocked(storage.headObject).mockResolvedValue(env.MAX_FILE_SIZE_BYTES);
     vi.mocked(storage.getStream).mockResolvedValue(makeReadable('fake'));
     vi.mocked(fileTypeFromBuffer).mockResolvedValue({ mime: 'audio/mpeg', ext: 'mp3' } as any);
-    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue('transcript');
+    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: 'transcript',
+      segments: [],
+    });
 
     const result = await extractText('exact.mp3', 'audio/mpeg');
-    expect(result).toBe('transcript');
+    expect(result.text).toBe('transcript');
   });
 
   it('does NOT throw FILE_TOO_LARGE when headObject returns null (unknown size)', async () => {
     vi.mocked(storage.headObject).mockResolvedValue(null);
     vi.mocked(storage.getStream).mockResolvedValue(makeReadable('fake'));
     vi.mocked(fileTypeFromBuffer).mockResolvedValue({ mime: 'audio/mpeg', ext: 'mp3' } as any);
-    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue('transcript');
+    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: 'transcript',
+      segments: [],
+    });
 
     const result = await extractText('unknown-size.mp3', 'audio/mpeg');
-    expect(result).toBe('transcript');
+    expect(result.text).toBe('transcript');
   });
 
   it('error is an instance of AppError with HTTP 400', async () => {
@@ -132,27 +138,32 @@ describe('AC-4: MIME type detection overrides client-supplied type', () => {
     const result = await extractText('mystery.bin', 'audio/mpeg'); // wrong client MIME
     // opts is undefined when not provided — just verify the key was passed correctly
     expect(extractImage).toHaveBeenCalledWith('mystery.bin', undefined);
-    expect(result).toBe('image description');
+    expect(result.text).toBe('image description');
   });
 
   it('routes to extractAudio when file-type detects audio/mpeg (client said image/jpeg)', async () => {
     vi.mocked(storage.getStream).mockResolvedValue(makeReadable('fake-audio-bytes'));
     vi.mocked(fileTypeFromBuffer).mockResolvedValue({ mime: 'audio/mpeg', ext: 'mp3' } as any);
-    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue('audio transcript');
+    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: 'audio transcript',
+      segments: [],
+    });
 
     const result = await extractText('mystery.bin', 'image/jpeg'); // wrong client MIME
     expect(extractAudio).toHaveBeenCalledWith('mystery.bin', undefined);
-    expect(result).toBe('audio transcript');
+    expect(result.text).toBe('audio transcript');
   });
 
   it('routes to extractVideo when file-type detects video/mp4 (client said text/plain)', async () => {
     vi.mocked(storage.getStream).mockResolvedValue(makeReadable('fake-video-bytes'));
     vi.mocked(fileTypeFromBuffer).mockResolvedValue({ mime: 'video/mp4', ext: 'mp4' } as any);
-    vi.mocked(extractVideo as ReturnType<typeof vi.fn>).mockResolvedValue('video description');
+    vi.mocked(extractVideo as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: 'video description',
+    });
 
     const result = await extractText('mystery.bin', 'text/plain'); // wrong client MIME
     expect(extractVideo).toHaveBeenCalledWith('mystery.bin', undefined);
-    expect(result).toBe('video description');
+    expect(result.text).toBe('video description');
   });
 
   it('falls back to normalised client MIME when file-type returns undefined', async () => {
@@ -164,7 +175,7 @@ describe('AC-4: MIME type detection overrides client-supplied type', () => {
     vi.mocked(fileTypeFromBuffer).mockResolvedValue(undefined);
 
     const result = await extractText('file.txt', 'text/plain');
-    expect(result).toBe(textContent);
+    expect(result.text).toBe(textContent);
   });
 
   it('strips charset parameter from client MIME before using as fallback', async () => {
@@ -175,7 +186,7 @@ describe('AC-4: MIME type detection overrides client-supplied type', () => {
     vi.mocked(fileTypeFromBuffer).mockResolvedValue(undefined);
 
     const result = await extractText('file.txt', 'text/plain; charset=utf-8');
-    expect(result).toBe(textContent);
+    expect(result.text).toBe(textContent);
   });
 });
 
@@ -202,7 +213,10 @@ describe('AC-6: onProgress callback is forwarded to sub-extractors', () => {
 
   it('passes onProgress to extractAudio for audio/* MIME type', async () => {
     vi.mocked(fileTypeFromBuffer).mockResolvedValue({ mime: 'audio/wav', ext: 'wav' } as any);
-    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue('transcript');
+    vi.mocked(extractAudio as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: 'transcript',
+      segments: [],
+    });
 
     const onProgress = vi.fn().mockResolvedValue(undefined);
     await extractText('sound.wav', 'audio/wav', { onProgress });
@@ -212,7 +226,7 @@ describe('AC-6: onProgress callback is forwarded to sub-extractors', () => {
 
   it('passes onProgress to extractVideo for video/* MIME type', async () => {
     vi.mocked(fileTypeFromBuffer).mockResolvedValue({ mime: 'video/mp4', ext: 'mp4' } as any);
-    vi.mocked(extractVideo as ReturnType<typeof vi.fn>).mockResolvedValue('video text');
+    vi.mocked(extractVideo as ReturnType<typeof vi.fn>).mockResolvedValue({ text: 'video text' });
 
     const onProgress = vi.fn().mockResolvedValue(undefined);
     await extractText('clip.mp4', 'video/mp4', { onProgress });

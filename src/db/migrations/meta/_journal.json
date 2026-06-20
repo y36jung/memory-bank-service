@@ -15,6 +15,13 @@
       "when": 1780805145696,
       "tag": "0001_loving_proemial_gods",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1750291200000,
+      "tag": "0002_add_chunk_time_bounds",
+      "breakpoints": true
     }
   ]
 }
