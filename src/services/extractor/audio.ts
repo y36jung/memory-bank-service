@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { fileTypeFromBuffer } from 'file-type';
 import OpenAI from 'openai';
 import { env } from '../../config/env.js';
@@ -18,7 +19,7 @@ import { withTimeout } from '../../lib/utils.js';
 import * as storage from '../storage.js';
 import type { ExtractOptions } from './index.js';
 
-if (env.FFMPEG_PATH) ffmpeg.setFfmpegPath(env.FFMPEG_PATH);
+ffmpeg.setFfmpegPath(env.FFMPEG_PATH ?? ffmpegInstaller.path);
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
@@ -58,6 +59,38 @@ export async function transcribeFile(filePath: string): Promise<TranscribeResult
     text: s.text,
   }));
   return { text: result.text, segments };
+}
+
+/**
+ * Transcribe a local audio file, automatically splitting it into segments if it exceeds the
+ * Whisper 25 MB per-request limit. Safe to call from other extractors (e.g. video.ts).
+ */
+export async function transcribeLocalFile(filePath: string): Promise<TranscribeResult> {
+  const size = statSync(filePath).size;
+
+  if (size <= WHISPER_SIZE_LIMIT) {
+    return transcribeFile(filePath);
+  }
+
+  const segDir = join(tmpdir(), randomUUID());
+  mkdirSync(segDir);
+  try {
+    const segPaths = await splitAudio(filePath, segDir);
+    const transcripts: string[] = [];
+    const allSegments: TranscribedSegment[] = [];
+    let offsetSecs = 0;
+    for (const segPath of segPaths) {
+      const result = await transcribeFile(segPath);
+      transcripts.push(result.text);
+      for (const seg of result.segments) {
+        allSegments.push({ ...seg, start: seg.start + offsetSecs, end: seg.end + offsetSecs });
+      }
+      offsetSecs += SEGMENT_DURATION_SECS;
+    }
+    return { text: transcripts.join(' '), segments: allSegments };
+  } finally {
+    rmSync(segDir, { recursive: true, force: true });
+  }
 }
 
 /** Split an audio file into ≤25 MB WAV segments using time-based split with PCM re-encoding. */

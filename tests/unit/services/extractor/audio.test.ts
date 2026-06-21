@@ -100,7 +100,7 @@ vi.mock('node:stream/promises', () => ({
 
 import * as storage from '../../../../src/services/storage.js';
 import { fileTypeFromBuffer } from 'file-type';
-import { extractAudio } from '../../../../src/services/extractor/audio.js';
+import { extractAudio, transcribeLocalFile } from '../../../../src/services/extractor/audio.js';
 import ffmpeg from 'fluent-ffmpeg';
 
 // ---------------------------------------------------------------------------
@@ -376,5 +376,77 @@ describe('AC-6 (audio): onProgress callback stages', () => {
     await extractAudio('audio/large.mp3', { onProgress });
     expect(stages.some(([s]) => s === 'splitting')).toBe(true);
     expect(stages.find(([s]) => s === 'splitting')?.[1]).toBe(20);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-1d: transcribeLocalFile — size-aware Whisper helper
+// ---------------------------------------------------------------------------
+
+describe('AC-1d: transcribeLocalFile — delegates to size-aware splitting', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockMkdirSync.mockReturnValue(undefined);
+    mockRmSync.mockReturnValue(undefined);
+    mockCreateReadStream.mockReturnValue(makeReadable('audio-content'));
+  });
+
+  it('calls Whisper directly (no ffmpeg) when file is under 25 MB', async () => {
+    mockStatSync.mockReturnValue({ size: WHISPER_LIMIT - 1 });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Small file text', segments: [] });
+
+    const result = await transcribeLocalFile('/tmp/audio.wav');
+    expect(result.text).toBe('Small file text');
+    expect(ffmpeg).not.toHaveBeenCalled();
+    expect(mockTranscriptionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls Whisper directly when file is exactly 25 MB', async () => {
+    mockStatSync.mockReturnValue({ size: WHISPER_LIMIT });
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Exact limit', segments: [] });
+
+    const result = await transcribeLocalFile('/tmp/audio.wav');
+    expect(result.text).toBe('Exact limit');
+    expect(ffmpeg).not.toHaveBeenCalled();
+  });
+
+  it('splits with ffmpeg and transcribes each segment when file exceeds 25 MB', async () => {
+    configureFfmpegEndCallback();
+    mockStatSync.mockReturnValue({ size: WHISPER_LIMIT + 1 });
+    mockReaddirSync.mockReturnValue(['seg-0000.wav', 'seg-0001.wav']);
+    mockTranscriptionsCreate
+      .mockResolvedValueOnce({ text: 'Part one', segments: [] })
+      .mockResolvedValueOnce({ text: 'Part two', segments: [] });
+
+    const result = await transcribeLocalFile('/tmp/big-audio.wav');
+    expect(ffmpeg).toHaveBeenCalledTimes(1);
+    expect(mockTranscriptionsCreate).toHaveBeenCalledTimes(2);
+    expect(result.text).toBe('Part one Part two');
+  });
+
+  it('applies time offsets to segments from each split chunk', async () => {
+    configureFfmpegEndCallback();
+    mockStatSync.mockReturnValue({ size: WHISPER_LIMIT + 1 });
+    mockReaddirSync.mockReturnValue(['seg-0000.wav', 'seg-0001.wav']);
+    const seg0 = { id: 0, start: 0, end: 5, text: 'Hello' };
+    const seg1 = { id: 0, start: 0, end: 3, text: 'World' };
+    mockTranscriptionsCreate
+      .mockResolvedValueOnce({ text: 'Hello', segments: [seg0] })
+      .mockResolvedValueOnce({ text: 'World', segments: [seg1] });
+
+    const result = await transcribeLocalFile('/tmp/big-audio.wav');
+    // seg0 offset = 0, seg1 offset = 720
+    expect(result.segments[0]?.start).toBe(0);
+    expect(result.segments[1]?.start).toBe(720); // SEGMENT_DURATION_SECS
+  });
+
+  it('cleans up the temp segment directory after splitting', async () => {
+    configureFfmpegEndCallback();
+    mockStatSync.mockReturnValue({ size: WHISPER_LIMIT + 1 });
+    mockReaddirSync.mockReturnValue(['seg-0000.wav']);
+    mockTranscriptionsCreate.mockResolvedValue({ text: 'Done', segments: [] });
+
+    await transcribeLocalFile('/tmp/big-audio.wav');
+    expect(mockRmSync).toHaveBeenCalledWith(expect.any(String), { recursive: true, force: true });
   });
 });
