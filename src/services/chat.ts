@@ -39,10 +39,11 @@ export interface Source {
 // ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT =
-  'You are a helpful assistant that answers questions based strictly on the provided context documents.\n' +
+  'You are a helpful assistant that answers questions based on the provided context documents.\n' +
   'When answering:\n' +
   '- Cite the source document name when referencing specific information.\n' +
-  '- If the context does not contain enough information to answer, say "I don\'t know based on the provided documents."\n' +
+  '- If the context is relevant but does not fully answer the question exactly, answer as best you can using the most closely related information in the documents — treat broader or adjacent facts as a fallback. Do not highlight what is missing; just answer from what is available. Never supplement with general knowledge.\n' +
+  '- If the context contains no relevant information at all, say "I don\'t know based on the provided documents."\n' +
   '- Do not hallucinate or add information not present in the context.';
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────

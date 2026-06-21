@@ -77,7 +77,7 @@ const EXTRACT_FILTERS_TOOL: OpenAI.ChatCompletionTool = {
           type: 'string',
           enum: ['list_documents', 'search_content'],
           description:
-            "Use 'list_documents' when the user wants to enumerate or list which documents exist (e.g. 'what did I upload last week?', 'show me my files', 'list documents from January'). Use 'search_content' when the user wants to find information contained within documents.",
+            "Use 'list_documents' ONLY when the user wants to see which files/documents they own (e.g. 'what did I upload last week?', 'show me my files', 'list documents from January'). Use 'search_content' for ALL other queries — including any query that asks about content or data inside a named document, even if the query uses words like 'list', 'enumerate', or 'all the X in Y' (e.g. 'what countries are in the destinations CSV?', 'list all items in my nutrition guide', 'enumerate the steps in document X').",
         },
         documentKeywords: {
           type: 'array',
@@ -134,8 +134,8 @@ export async function classifyQuery(
   const systemPrompt =
     `Today's date is ${currentDate}. Use this to resolve relative date expressions like "last week", "yesterday", or "this month" into ISO date strings.\n\n` +
     'Classify the user query and extract metadata filters. Always set the intent field. ' +
-    "Use 'list_documents' when the user wants to enumerate or list documents. " +
-    "Use 'search_content' when the user wants to find information within documents. " +
+    "Use 'list_documents' ONLY when the user wants to enumerate or list the files/documents they own (e.g. 'what did I upload?', 'show me my files'). " +
+    "Use 'search_content' for ALL other queries, including any query that asks about content inside a named document — even if the query contains words like 'list', 'enumerate', or 'all the X in Y' (those words refer to items within the document, not to the document itself). " +
     'Return only filters you are confident about. ' +
     "Return an empty object (with just the intent) if the query has no metadata filter intent (e.g. it's asking about content, " +
     'not about when/where/what-type a document is). documentKeywords must be individual word tokens, not phrases. ' +
