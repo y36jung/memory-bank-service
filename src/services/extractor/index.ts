@@ -9,6 +9,7 @@ import { extractSpreadsheet } from './spreadsheet.js';
 import { extractImage } from './image.js';
 import { extractAudio } from './audio.js';
 import { extractVideo } from './video.js';
+import type { TranscribedSegment } from './audio.js';
 
 // ---------------------------------------------------------------------------
 // Supported MIME types
@@ -43,6 +44,11 @@ export type SupportedMimeType = (typeof SUPPORTED_MIME_TYPES)[keyof typeof SUPPO
 
 export interface ExtractOptions {
   onProgress?: (stage: string, pct: number) => Promise<void>;
+}
+
+export interface ExtractionResult {
+  text: string;
+  segments?: TranscribedSegment[]; // only populated for audio/video
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +94,7 @@ export async function extractText(
   key: string,
   mimeType: string,
   opts?: ExtractOptions,
-): Promise<string> {
+): Promise<ExtractionResult> {
   // Step 1: size pre-check
   const sizeBytes = await storage.headObject(key);
   if (sizeBytes !== null && sizeBytes > env.MAX_FILE_SIZE_BYTES) {
@@ -116,10 +122,11 @@ export async function extractText(
 
   // Step 3: dispatch
   if (resolvedMime.startsWith('image/')) {
-    return extractImage(key, opts);
+    return { text: await extractImage(key, opts) };
   }
   if (resolvedMime.startsWith('audio/')) {
-    return extractAudio(key, opts);
+    const r = await extractAudio(key, opts);
+    return { text: r.text, segments: r.segments };
   }
   if (resolvedMime.startsWith('video/')) {
     return extractVideo(key, opts);
@@ -131,22 +138,22 @@ export async function extractText(
   switch (resolvedMime) {
     case SUPPORTED_MIME_TYPES.TEXT_PLAIN:
     case SUPPORTED_MIME_TYPES.TEXT_MARKDOWN:
-      return streamToUtf8String(stream);
+      return { text: await streamToUtf8String(stream) };
 
     case SUPPORTED_MIME_TYPES.APPLICATION_PDF: {
       const buf = await streamToBuffer(stream);
-      return extractPdf(buf);
+      return { text: await extractPdf(buf) };
     }
 
     case SUPPORTED_MIME_TYPES.APPLICATION_DOCX: {
       const buf = await streamToBuffer(stream);
-      return extractDocx(buf);
+      return { text: await extractDocx(buf) };
     }
 
     case SUPPORTED_MIME_TYPES.TEXT_CSV:
     case SUPPORTED_MIME_TYPES.APPLICATION_XLSX: {
       const buf = await streamToBuffer(stream);
-      return extractSpreadsheet(buf, resolvedMime);
+      return { text: await extractSpreadsheet(buf, resolvedMime) };
     }
 
     default:

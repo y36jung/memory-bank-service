@@ -4,14 +4,75 @@ import { eq, and, lt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { documents, chunks, ingestionJobs } from '../db/schema.js';
 import { extractText } from './extractor/index.js';
+import type { TranscribedSegment } from './extractor/audio.js';
 import { env } from '../config/env.js';
 import { chunkText } from './chunker.js';
+import type { Chunk } from './chunker.js';
+import { countTokens } from '../lib/tokenizer.js';
 import { batchEmbed } from './embeddings.js';
 import { upsertPoints, deletePoints } from './qdrant.js';
 import { generateQdrantId } from '../lib/idgen.js';
 import { withTimeout } from '../lib/utils.js';
 import { ingestionQueue } from '../queue/index.js';
 import type { IngestionJobPayload } from '../queue/index.js';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+interface MediaChunk extends Chunk {
+  startSecs: number;
+  endSecs: number;
+}
+
+type IngestChunk = Chunk | MediaChunk;
+
+// ─── Media chunking ────────────────────────────────────────────────────────────
+
+const MEDIA_TARGET_TOKENS = 800;
+
+/**
+ * Group consecutive Whisper segments greedily into chunks of up to 800 tokens.
+ * No overlap is applied — segment boundaries are already natural speech units.
+ */
+function chunkSegments(segments: TranscribedSegment[]): MediaChunk[] {
+  const result: MediaChunk[] = [];
+  let groupTexts: string[] = [];
+  let groupTokens = 0;
+  let groupStart = 0;
+  let groupEnd = 0;
+  let chunkIndex = 0;
+
+  const flush = (): void => {
+    if (groupTexts.length === 0) return;
+    const content = groupTexts.join(' ').trim();
+    result.push({
+      content,
+      tokenCount: countTokens(content),
+      chunkIndex: chunkIndex++,
+      startSecs: groupStart,
+      endSecs: groupEnd,
+    });
+    groupTexts = [];
+    groupTokens = 0;
+  };
+
+  for (const seg of segments) {
+    const segTokens = countTokens(seg.text);
+
+    if (groupTokens + segTokens > MEDIA_TARGET_TOKENS && groupTexts.length > 0) {
+      flush();
+      groupStart = seg.start;
+    } else if (groupTexts.length === 0) {
+      groupStart = seg.start;
+    }
+
+    groupTexts.push(seg.text);
+    groupTokens += segTokens;
+    groupEnd = seg.end;
+  }
+
+  flush();
+  return result;
+}
 
 function isMediaMimeType(mimeType: string): boolean {
   return (
@@ -80,7 +141,7 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
       }
     : undefined;
 
-  const text = await withTimeout(
+  const extraction = await withTimeout(
     onProgress
       ? extractText(storageKey, doc.mimeType, { onProgress })
       : extractText(storageKey, doc.mimeType),
@@ -89,7 +150,11 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
   );
 
   // Step 4 CHUNK (synchronous — no timeout per PLAN.md).
-  const produced = chunkText(text);
+  // Fork: media path (segments present) vs text path.
+  const produced: IngestChunk[] =
+    extraction.segments && extraction.segments.length > 0
+      ? chunkSegments(extraction.segments)
+      : chunkText(extraction.text);
 
   // Step 5 EMBED (30s timeout per batch).
   const vectors = await withTimeout(batchEmbed(produced.map((c) => c.content)), 30_000, 'embed');
@@ -107,6 +172,8 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
           chunkIndex: c.chunkIndex,
           content: c.content,
           tokenCount: c.tokenCount,
+          startSecs: (c as MediaChunk).startSecs ?? null,
+          endSecs: (c as MediaChunk).endSecs ?? null,
         })),
       );
       await tx

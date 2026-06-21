@@ -5,6 +5,7 @@ import {
   text,
   integer,
   bigint,
+  real,
   timestamp,
   jsonb,
 } from 'drizzle-orm/pg-core';
@@ -53,6 +54,8 @@ export const chunks = pgTable('chunks', {
   chunkIndex: integer('chunk_index').notNull(),
   content: text('content').notNull(),
   tokenCount: integer('token_count').notNull(),
+  startSecs: real('start_secs'),
+  endSecs: real('end_secs'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

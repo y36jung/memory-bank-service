@@ -228,7 +228,7 @@ describe('extractText — MIME type dispatch', () => {
       .mockResolvedValueOnce(stringToReadable(expected));
 
     const result = await extractText('some/key.txt', 'text/plain');
-    expect(result).toBe(expected);
+    expect(result.text).toBe(expected);
   });
 
   it('handles text/markdown by returning the stream content as UTF-8', async () => {
@@ -238,7 +238,7 @@ describe('extractText — MIME type dispatch', () => {
       .mockResolvedValueOnce(stringToReadable(expected));
 
     const result = await extractText('some/key.md', 'text/markdown');
-    expect(result).toBe(expected);
+    expect(result.text).toBe(expected);
   });
 
   it('handles text/plain with charset parameter (strips MIME params)', async () => {
@@ -248,7 +248,7 @@ describe('extractText — MIME type dispatch', () => {
       .mockResolvedValueOnce(stringToReadable(expected));
 
     const result = await extractText('some/key.txt', 'text/plain; charset=utf-8');
-    expect(result).toBe(expected);
+    expect(result.text).toBe(expected);
   });
 
   it('handles application/pdf by parsing the buffer', async () => {
@@ -285,9 +285,9 @@ describe('extractText — MIME type dispatch', () => {
       'some/key.docx',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
-    expect(typeof result).toBe('string');
-    expect(result.length).toBeGreaterThan(0);
-    expect(result).toContain('Walking on imported air');
+    expect(typeof result.text).toBe('string');
+    expect(result.text.length).toBeGreaterThan(0);
+    expect(result.text).toContain('Walking on imported air');
   });
 
   it('handles text/csv by converting to TSV', async () => {
@@ -297,8 +297,8 @@ describe('extractText — MIME type dispatch', () => {
       .mockResolvedValueOnce(bufferToReadable(Buffer.from(csv)));
 
     const result = await extractText('some/key.csv', 'text/csv');
-    expect(result).toContain('a\tb');
-    expect(result).toContain('1\t2');
+    expect(result.text).toContain('a\tb');
+    expect(result.text).toContain('1\t2');
   });
 
   it('handles application/vnd.openxmlformats-officedocument.spreadsheetml.sheet (XLSX)', async () => {
@@ -319,8 +319,8 @@ describe('extractText — MIME type dispatch', () => {
       'some/key.xlsx',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    expect(result).toContain('# Sheet: Sheet1');
-    expect(result).toContain('x\ty');
+    expect(result.text).toContain('# Sheet: Sheet1');
+    expect(result.text).toContain('x\ty');
   });
 
   it('throws AppError("UNSUPPORTED_FORMAT") for unknown MIME type', async () => {
@@ -347,7 +347,7 @@ describe('extractText — MIME type dispatch', () => {
     vi.mocked(extractImage).mockResolvedValue('image description');
     const result = await extractText('photo.jpg', 'image/jpeg');
     expect(extractImage).toHaveBeenCalled();
-    expect(result).toBe('image description');
+    expect(result.text).toBe('image description');
   });
 
   // M2: audio/mpeg now routes to extractAudio — NOT UNSUPPORTED_FORMAT
@@ -355,9 +355,9 @@ describe('extractText — MIME type dispatch', () => {
     vi.mocked(storage.getStream).mockResolvedValueOnce(stringToReadable('audio data'));
     const { extractAudio } = await import('../../../src/services/extractor/audio.js');
     // Re-set mock return value after vi.resetAllMocks() cleared it
-    vi.mocked(extractAudio).mockResolvedValue('audio transcript');
+    vi.mocked(extractAudio).mockResolvedValue({ text: 'audio transcript', segments: [] });
     const result = await extractText('audio.mp3', 'audio/mpeg');
     expect(extractAudio).toHaveBeenCalled();
-    expect(result).toBe('audio transcript');
+    expect(result.text).toBe('audio transcript');
   });
 });

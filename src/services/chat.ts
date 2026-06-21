@@ -3,7 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { db } from '../db/index.js';
 import { messages, chatSessions } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
-import { retrieveChunks, type RetrievedChunk } from './retrieval.js';
+import { retrieve, type RetrievedChunk, type RetrievedDocument } from './retrieval.js';
 import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
 import { countTokens } from '../lib/tokenizer.js';
@@ -30,10 +30,10 @@ const HISTORY_DEPTH = 6;
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Source {
-  chunkId: string;
+  chunkId?: string;
   documentId: string;
   documentName: string;
-  score: number;
+  score?: number;
 }
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -47,6 +47,19 @@ const SYSTEM_PROMPT =
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
 
+function formatTimestamp(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatSize(sizeBytes: number | null): string {
+  if (sizeBytes === null) return 'unknown size';
+  return sizeBytes >= 1_048_576
+    ? `${(sizeBytes / 1_048_576).toFixed(1)} MB`
+    : `${(sizeBytes / 1024).toFixed(1)} KB`;
+}
+
 /**
  * Concatenate retrieved chunks into a single context string with source headers.
  * Chunks are assumed to be pre-sorted by score descending.
@@ -58,11 +71,15 @@ function buildContextString(retrievedChunks: RetrievedChunk[]): string {
   let totalTokens = 0;
 
   for (const chunk of retrievedChunks) {
-    const part = `--- Source: ${chunk.documentName} ---\n${chunk.content}\n\n`;
+    let header = `--- Source: ${chunk.documentName} | Uploaded: ${chunk.createdAt.toISOString()} | Type: ${chunk.sourceType} | Format: ${chunk.mimeType} | Size: ${formatSize(chunk.sizeBytes)}`;
+    if (chunk.startSecs !== null && chunk.endSecs !== null) {
+      header += ` | Timestamp: ${formatTimestamp(chunk.startSecs)}–${formatTimestamp(chunk.endSecs)}`;
+    }
+    header += ` ---`;
+    const part = `${header}\n${chunk.content}\n\n`;
     const partTokens = countTokens(part);
 
     if (totalTokens + partTokens > MAX_CONTEXT_TOKENS) {
-      // Dropping this chunk (and all remaining lower-scored ones) keeps us within budget.
       break;
     }
 
@@ -73,12 +90,33 @@ function buildContextString(retrievedChunks: RetrievedChunk[]): string {
   return parts.join('');
 }
 
+/**
+ * Format a document list as a markdown table for the system prompt context.
+ * Used when the query intent is list_documents.
+ */
+function buildDocumentListContext(docs: RetrievedDocument[]): string {
+  if (docs.length === 0) {
+    return '## Documents\n\nNo documents found matching the query.\n';
+  }
+
+  const header =
+    '## Documents\n\n| Name | Uploaded | Source | Format | Size |\n|------|----------|--------|--------|------|\n';
+  const rows = docs
+    .map(
+      (d) =>
+        `| ${d.documentName} | ${d.createdAt.toISOString().split('T')[0]} | ${d.sourceType} | ${d.mimeType} | ${formatSize(d.sizeBytes)} |`,
+    )
+    .join('\n');
+
+  return header + rows + '\n';
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Handle a user message for the given session:
  *  1. Validates the session exists.
- *  2. Retrieves relevant chunks from the vector store.
+ *  2. Retrieves relevant chunks or document list from the store.
  *  3. Persists the user message.
  *  4. Streams a GPT-4o response via SSE.
  *  5. Persists the assistant message with sources on stream completion.
@@ -102,7 +140,7 @@ export async function streamChatResponse(
   }
 
   // ── Step 2: Retrieve grounding context ───────────────────────────────────
-  const retrievedChunks = await retrieveChunks(userMessage);
+  const retrievalResult = await retrieve(userMessage);
 
   // ── Step 3: Insert user message ──────────────────────────────────────────
   await db.insert(messages).values({
@@ -112,10 +150,27 @@ export async function streamChatResponse(
   });
 
   // ── Step 4: Build context string ──────────────────────────────────────────
-  const contextString = buildContextString(retrievedChunks);
+  let contextString: string;
+  let sources: Source[];
+
+  if (retrievalResult.type === 'document_list') {
+    contextString = buildDocumentListContext(retrievalResult.documents);
+    sources = retrievalResult.documents.map((d) => ({
+      documentId: d.documentId,
+      documentName: d.documentName,
+    }));
+  } else {
+    contextString = buildContextString(retrievalResult.chunks);
+    sources = retrievalResult.chunks.map((c) => ({
+      chunkId: c.chunkId,
+      documentId: c.documentId,
+      documentName: c.documentName,
+      score: c.score,
+    }));
+  }
 
   const systemContent =
-    contextString.length > 0 ? `${SYSTEM_PROMPT}\n\n## Context\n\n${contextString}` : SYSTEM_PROMPT;
+    contextString.length > 0 ? `${SYSTEM_PROMPT}\n\n${contextString}` : SYSTEM_PROMPT;
 
   // ── Step 5: Load recent chat history (last HISTORY_DEPTH messages) ────────
   const historyRows = (
@@ -169,13 +224,6 @@ export async function streamChatResponse(
   }
 
   // ── Step 9: Persist assistant message and emit done event ─────────────────
-  const sources: Source[] = retrievedChunks.map((c) => ({
-    chunkId: c.chunkId,
-    documentId: c.documentId,
-    documentName: c.documentName,
-    score: c.score,
-  }));
-
   let messageId: string;
   try {
     const [inserted] = await db

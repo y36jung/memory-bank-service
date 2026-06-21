@@ -145,7 +145,7 @@ function setupBaseMocks(keyframes: string[] = ['frame-0001.jpg', 'frame-0002.jpg
   mockMkdirSync.mockReturnValue(undefined);
   mockRmSync.mockReturnValue(undefined);
   mockCreateWriteStream.mockReturnValue({ write: vi.fn(), end: vi.fn() });
-  mockTranscribeFile.mockResolvedValue('audio transcript');
+  mockTranscribeFile.mockResolvedValue({ text: 'audio transcript', segments: [] });
   configureFfmpegForEnd();
   // Return keyframe files from readdirSync
   mockReaddirSync.mockReturnValue(keyframes);
@@ -170,9 +170,9 @@ describe('AC-3: extractVideo — two-pass (audio + keyframes) → merged text', 
 
   it('returns merged text containing both [Visual Descriptions] and [Transcript] sections', async () => {
     const result = await extractVideo('video/clip.mp4');
-    expect(result).toContain('[Visual Descriptions]');
-    expect(result).toContain('[Transcript]');
-    expect(result).toContain('audio transcript');
+    expect(result.text).toContain('[Visual Descriptions]');
+    expect(result.text).toContain('[Transcript]');
+    expect(result.text).toContain('audio transcript');
   });
 
   it('calls transcribeFile (Whisper) for the audio track', async () => {
@@ -206,8 +206,8 @@ describe('AC-3: extractVideo — two-pass (audio + keyframes) → merged text', 
 
   it('labels each frame with its timestamp based on KEYFRAME_INTERVAL', async () => {
     const result = await extractVideo('video/clip.mp4');
-    expect(result).toContain('[Frame at 0s]');
-    expect(result).toContain(`[Frame at ${KEYFRAME_INTERVAL}s]`);
+    expect(result.text).toContain('[Frame at 0s]');
+    expect(result.text).toContain(`[Frame at ${KEYFRAME_INTERVAL}s]`);
   });
 
   it('invokes ffmpeg twice: once for audio extraction, once for keyframe extraction', async () => {
@@ -242,15 +242,15 @@ describe('AC-3: extractVideo — two-pass (audio + keyframes) → merged text', 
     vi.resetAllMocks();
     setupBaseMocks([]); // no keyframes
     const result = await extractVideo('video/empty.mp4');
-    expect(result).toContain('[Transcript]');
-    expect(result).toContain('[Visual Descriptions]');
+    expect(result.text).toContain('[Transcript]');
+    expect(result.text).toContain('[Visual Descriptions]');
     expect(mockChatCreate).not.toHaveBeenCalled();
   });
 
   it('merged output places visual descriptions before transcript', async () => {
     const result = await extractVideo('video/clip.mp4');
-    const visualIdx = result.indexOf('[Visual Descriptions]');
-    const transcriptIdx = result.indexOf('[Transcript]');
+    const visualIdx = result.text.indexOf('[Visual Descriptions]');
+    const transcriptIdx = result.text.indexOf('[Transcript]');
     expect(visualIdx).toBeLessThan(transcriptIdx);
   });
 });
@@ -270,7 +270,7 @@ describe('AC-7: extractVideo — S3 sidecar caching', () => {
     vi.mocked(storage.getObjectBuffer).mockResolvedValue(Buffer.from(sidecar, 'utf-8'));
 
     const result = await extractVideo('video/clip.mp4');
-    expect(result).toBe(mergedText);
+    expect(result.text).toBe(mergedText);
     expect(mockChatCreate).not.toHaveBeenCalled();
     expect(mockTranscribeFile).not.toHaveBeenCalled();
   });
@@ -305,7 +305,7 @@ describe('AC-7: extractVideo — S3 sidecar caching', () => {
 
     const putArgs = vi.mocked(storage.putObject).mock.calls[0]!;
     const sidecar = JSON.parse(putArgs[1] as string);
-    expect(sidecar.mergedText).toBe(result);
+    expect(sidecar.mergedText).toBe(result.text);
   });
 });
 

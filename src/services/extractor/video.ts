@@ -10,7 +10,8 @@ import { env } from '../../config/env.js';
 import { withTimeout } from '../../lib/utils.js';
 import * as storage from '../storage.js';
 import { transcribeFile } from './audio.js';
-import type { ExtractOptions } from './index.js';
+import type { TranscribedSegment } from './audio.js';
+import type { ExtractOptions, ExtractionResult } from './index.js';
 
 if (env.FFMPEG_PATH) ffmpeg.setFfmpegPath(env.FFMPEG_PATH);
 
@@ -20,6 +21,8 @@ const KEYFRAME_INTERVAL = 10; // seconds
 
 interface VideoSidecar {
   mergedText: string;
+  /** Present in sidecars written after the plan-gap fix; absent in older cached sidecars. */
+  segments?: TranscribedSegment[];
   createdAt: string;
 }
 
@@ -57,17 +60,24 @@ function extractKeyframes(inputPath: string, outDir: string, interval: number): 
  * Two-pass video extraction: audio track → Whisper transcript + keyframes → GPT-4o Vision.
  * Results are cached in an S3 sidecar file.
  */
-export async function extractVideo(key: string, opts?: ExtractOptions): Promise<string> {
+export async function extractVideo(key: string, opts?: ExtractOptions): Promise<ExtractionResult> {
   const sidecarKey = key + '.vision-cache.json';
   const cached = await storage.getObjectBuffer(sidecarKey);
   if (cached) {
     try {
       const sidecar = JSON.parse(cached.toString('utf-8')) as VideoSidecar;
-      if (sidecar.mergedText) return sidecar.mergedText;
+      if (sidecar.mergedText) {
+        const result: ExtractionResult = { text: sidecar.mergedText };
+        if (sidecar.segments !== undefined) result.segments = sidecar.segments;
+        return result;
+      }
     } catch {
       // malformed sidecar — recompute
     }
   }
+
+  // Separate variable to accumulate Whisper segments from the audio pass.
+  let audioSegments: TranscribedSegment[] = [];
 
   // Detect extension
   const headerStream = await storage.getStream(key);
@@ -98,7 +108,9 @@ export async function extractVideo(key: string, opts?: ExtractOptions): Promise<
     const tmpAudioPath = join(tmpDir, 'audio.wav');
     await extractAudioTrack(tmpVideoPath, tmpAudioPath);
     await opts?.onProgress?.('transcribing', 30);
-    const transcript = await transcribeFile(tmpAudioPath);
+    const transcribeResult = await transcribeFile(tmpAudioPath);
+    const transcript = transcribeResult.text;
+    audioSegments = transcribeResult.segments;
     await opts?.onProgress?.('transcribing', 45);
 
     // Pass 2: keyframes → Vision descriptions
@@ -153,11 +165,15 @@ export async function extractVideo(key: string, opts?: ExtractOptions): Promise<
 
     await opts?.onProgress?.('merging', 99);
 
-    const sidecar: VideoSidecar = { mergedText, createdAt: new Date().toISOString() };
+    const sidecar: VideoSidecar = {
+      mergedText,
+      segments: audioSegments,
+      createdAt: new Date().toISOString(),
+    };
     await storage.putObject(sidecarKey, JSON.stringify(sidecar), 'application/json');
 
     await opts?.onProgress?.('done', 100);
-    return mergedText;
+    return { text: mergedText, segments: audioSegments };
   } finally {
     rmSync(tmpVideoPath, { force: true });
     rmSync(tmpDir, { recursive: true, force: true });

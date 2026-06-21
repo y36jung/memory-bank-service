@@ -14,6 +14,7 @@ process.env['AWS_ACCESS_KEY_ID'] = 'test-access-key-id';
 process.env['AWS_SECRET_ACCESS_KEY'] = 'test-secret-access-key';
 process.env['S3_BUCKET_NAME'] = 'test-bucket';
 process.env['OPENAI_API_KEY'] = 'sk-test-openai-key-placeholder-for-unit-tests';
+process.env['ANTHROPIC_API_KEY'] = 'test-anthropic-key';
 process.env['JWT_SECRET'] = 'test-jwt-secret-that-is-at-least-32-chars!!';
 process.env['GOOGLE_CLIENT_ID'] = 'test-google-client-id';
 process.env['GOOGLE_CLIENT_SECRET'] = 'test-google-client-secret';
