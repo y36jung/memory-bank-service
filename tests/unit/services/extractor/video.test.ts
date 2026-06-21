@@ -21,7 +21,7 @@ const {
   mockMkdirSync,
   mockRmSync,
   mockCreateWriteStream,
-  mockTranscribeFile,
+  mockTranscribeLocalFile,
 } = vi.hoisted(() => ({
   mockChatCreate: vi.fn(),
   mockReadFileSync: vi.fn(),
@@ -29,7 +29,7 @@ const {
   mockMkdirSync: vi.fn(),
   mockRmSync: vi.fn(),
   mockCreateWriteStream: vi.fn(),
-  mockTranscribeFile: vi.fn(),
+  mockTranscribeLocalFile: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -88,9 +88,9 @@ vi.mock('node:stream/promises', () => ({
   pipeline: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock the transcribeFile helper from audio.ts directly (mockTranscribeFile is vi.hoisted)
+// Mock the transcribeLocalFile helper from audio.ts directly (mockTranscribeLocalFile is vi.hoisted)
 vi.mock('../../../../src/services/extractor/audio.js', () => ({
-  transcribeFile: mockTranscribeFile,
+  transcribeLocalFile: mockTranscribeLocalFile,
   extractAudio: vi.fn(),
 }));
 
@@ -145,7 +145,7 @@ function setupBaseMocks(keyframes: string[] = ['frame-0001.jpg', 'frame-0002.jpg
   mockMkdirSync.mockReturnValue(undefined);
   mockRmSync.mockReturnValue(undefined);
   mockCreateWriteStream.mockReturnValue({ write: vi.fn(), end: vi.fn() });
-  mockTranscribeFile.mockResolvedValue({ text: 'audio transcript', segments: [] });
+  mockTranscribeLocalFile.mockResolvedValue({ text: 'audio transcript', segments: [] });
   configureFfmpegForEnd();
   // Return keyframe files from readdirSync
   mockReaddirSync.mockReturnValue(keyframes);
@@ -175,11 +175,11 @@ describe('AC-3: extractVideo — two-pass (audio + keyframes) → merged text', 
     expect(result.text).toContain('audio transcript');
   });
 
-  it('calls transcribeFile (Whisper) for the audio track', async () => {
+  it('calls transcribeLocalFile (Whisper) for the audio track', async () => {
     await extractVideo('video/clip.mp4');
-    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+    expect(mockTranscribeLocalFile).toHaveBeenCalledTimes(1);
     // The audio path should end in .wav (extracted audio track)
-    const audioPath: string = mockTranscribeFile.mock.calls[0][0];
+    const audioPath: string = mockTranscribeLocalFile.mock.calls[0][0];
     expect(audioPath).toMatch(/\.wav$/);
   });
 
@@ -272,7 +272,7 @@ describe('AC-7: extractVideo — S3 sidecar caching', () => {
     const result = await extractVideo('video/clip.mp4');
     expect(result.text).toBe(mergedText);
     expect(mockChatCreate).not.toHaveBeenCalled();
-    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    expect(mockTranscribeLocalFile).not.toHaveBeenCalled();
   });
 
   it('on cache HIT: checks the correct sidecar key (<key>.vision-cache.json)', async () => {

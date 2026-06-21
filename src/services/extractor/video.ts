@@ -4,16 +4,17 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import OpenAI from 'openai';
 import { fileTypeFromBuffer } from 'file-type';
 import { env } from '../../config/env.js';
 import { withTimeout } from '../../lib/utils.js';
 import * as storage from '../storage.js';
-import { transcribeFile } from './audio.js';
+import { transcribeLocalFile } from './audio.js';
 import type { TranscribedSegment } from './audio.js';
 import type { ExtractOptions, ExtractionResult } from './index.js';
 
-if (env.FFMPEG_PATH) ffmpeg.setFfmpegPath(env.FFMPEG_PATH);
+ffmpeg.setFfmpegPath(env.FFMPEG_PATH ?? ffmpegInstaller.path);
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
@@ -108,7 +109,7 @@ export async function extractVideo(key: string, opts?: ExtractOptions): Promise<
     const tmpAudioPath = join(tmpDir, 'audio.wav');
     await extractAudioTrack(tmpVideoPath, tmpAudioPath);
     await opts?.onProgress?.('transcribing', 30);
-    const transcribeResult = await transcribeFile(tmpAudioPath);
+    const transcribeResult = await transcribeLocalFile(tmpAudioPath);
     const transcript = transcribeResult.text;
     audioSegments = transcribeResult.segments;
     await opts?.onProgress?.('transcribing', 45);
