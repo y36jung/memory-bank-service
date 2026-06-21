@@ -360,3 +360,69 @@ describe('AC-CQ-10: search_content with no filters → null', () => {
     expect(result).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC-CQ-11: filename / document-identity queries → list_documents
+// (moved from RAGAS tc-22: these skip vector search entirely)
+// ---------------------------------------------------------------------------
+
+describe('AC-CQ-11: filename/document-identity queries → list_documents', () => {
+  it('returns list_documents with documentKeywords for "what file contains X" queries', async () => {
+    mockChatCreate.mockResolvedValue(
+      makeToolCallResponse({ intent: 'list_documents', documentKeywords: ['nutrition'] }),
+    );
+
+    const result = await classifyQuery(
+      'What is the name of the file that contains information about nutrition?',
+      TEST_DATE,
+    );
+    expect(result).not.toBeNull();
+    expect(result?.intent).toBe('list_documents');
+    expect(result?.filters?.documentKeywords).toContain('nutrition');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-CQ-12: upload-date metadata queries → list_documents
+// (moved from RAGAS tc-23: upload date is in documents table, not chunks)
+// ---------------------------------------------------------------------------
+
+describe('AC-CQ-12: upload-date metadata queries → list_documents', () => {
+  it('returns list_documents with documentKeywords for upload-date queries about a named doc', async () => {
+    mockChatCreate.mockResolvedValue(
+      makeToolCallResponse({
+        intent: 'list_documents',
+        documentKeywords: ['retirement', 'planning'],
+      }),
+    );
+
+    const result = await classifyQuery(
+      'When was the retirement planning document uploaded to the memory bank?',
+      TEST_DATE,
+    );
+    expect(result).not.toBeNull();
+    expect(result?.intent).toBe('list_documents');
+    expect(result?.filters?.documentKeywords).toEqual(
+      expect.arrayContaining(['retirement', 'planning']),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-CQ-13: topic-based document enumeration → list_documents
+// (moved from RAGAS tc-30: enumerating documents by topic skips vector search)
+// ---------------------------------------------------------------------------
+
+describe('AC-CQ-13: topic-based document enumeration → list_documents', () => {
+  it('returns list_documents with filters: null for broad topic enumeration queries', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ intent: 'list_documents' }));
+
+    const result = await classifyQuery(
+      'Which documents in the memory bank are related to personal finance or investment?',
+      TEST_DATE,
+    );
+    expect(result).not.toBeNull();
+    expect(result?.intent).toBe('list_documents');
+    expect(result?.filters).toBeNull();
+  });
+});

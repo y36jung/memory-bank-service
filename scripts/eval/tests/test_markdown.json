@@ -99,24 +99,6 @@
     "notes": "Re-index idempotency test. Run eval before and after deleting and re-uploading rest_api_guide.md. Scores should be identical within ±0.05."
   },
   {
-    "id": "tc-22",
-    "group": 1,
-    "tags": ["metadata", "filename"],
-    "question": "What is the name of the file that contains information about nutrition?",
-    "fixture_docs": ["nutrition_guide.md"],
-    "ground_truth": null,
-    "notes": "Filename metadata query. Tests whether the system surfaces the source document name (nutrition_guide.md) from document metadata rather than only from chunk content. The model should correctly identify the filename; fabricating a name is a faithfulness failure."
-  },
-  {
-    "id": "tc-23",
-    "group": 1,
-    "tags": ["metadata", "date-uploaded"],
-    "question": "When was the retirement planning document uploaded to the memory bank?",
-    "fixture_docs": ["retirement_planning.md"],
-    "ground_truth": null,
-    "notes": "Upload-date metadata query. Tests whether the system retrieves the per-document upload timestamp from document metadata. The model should report the actual indexed date or acknowledge uncertainty -- fabricating a date is a faithfulness failure."
-  },
-  {
     "id": "tc-27",
     "group": 1,
     "tags": ["metadata", "file-size", "db-stored"],
@@ -142,19 +124,5 @@
     "fixture_docs": ["nutrition_guide.md"],
     "ground_truth": "The nutrition guide references the World Health Organization (WHO), the Dietary Reference Intakes (DRI) published by the National Academies of Sciences, Engineering, and Medicine, and Health Canada's Canadian Nutrient File.",
     "notes": "Content-embedded authority metadata. The Introduction section of nutrition_guide.md explicitly names these three sources. Tests accurate reporting of cited authorities from document content; hallucinating additional organisations is a faithfulness failure."
-  },
-  {
-    "id": "tc-30",
-    "group": 1,
-    "tags": ["metadata", "content-derived", "topic-classification", "cross-doc", "inventory"],
-    "question": "Which documents in the memory bank are related to personal finance or investment?",
-    "fixture_docs": [
-      "finance_basics.md",
-      "finance_advanced.md",
-      "investment_basics.md",
-      "retirement_planning.md"
-    ],
-    "ground_truth": null,
-    "notes": "Cross-document topic classification query. Tests whether the system enumerates documents by topic using document names and chunk content. Expected to name finance_basics.md, finance_advanced.md, investment_basics.md, and retirement_planning.md. A partial list indicates retrieval saturation across documents; documents outside those four should not appear."
   }
 ]
