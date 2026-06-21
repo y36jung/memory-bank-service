@@ -219,7 +219,12 @@ export async function retrieve(
   scoreThreshold = 0.4,
 ): Promise<RetrievalResult> {
   const currentDate = new Date().toISOString().split('T')[0] as string;
-  const classification = await classifyQuery(query, currentDate);
+
+  // classifyQuery and HyDE both need only the query string — run in parallel.
+  const [classification, hydeText] = await Promise.all([
+    classifyQuery(query, currentDate),
+    generateHypotheticalAnswer(query),
+  ]);
 
   // list_documents path: skip vector search, query documents table directly.
   if (classification?.intent === 'list_documents') {
@@ -227,69 +232,71 @@ export async function retrieve(
     return { type: 'document_list', documents: docs };
   }
 
-  // Content search path: HyDE + vector search + optional metadata fusion.
-  const [hydeText] = await Promise.all([generateHypotheticalAnswer(query)]);
+  // Vector chain and metadata SQL are independent once classification + hydeText are ready.
+  const [vectorChunksOrNull, sqlChunks] = await Promise.all([
+    // Vector chain: embed → Qdrant → Postgres hydration.
+    (async (): Promise<RetrievedChunk[] | null> => {
+      const [vector] = await batchEmbed([hydeText]);
+      if (vector === undefined) return null;
 
-  const [vector] = await batchEmbed([hydeText]);
+      const qdrantResults = await searchPoints(vector, topK, scoreThreshold);
+      if (qdrantResults.length === 0) return [];
 
-  if (vector === undefined) return { type: 'chunk_results', chunks: [] };
+      const qdrantIds = qdrantResults.map((r) => r.id);
+      const scoreByQdrantId = new Map(qdrantResults.map((r) => [r.id, r.score]));
 
-  // Vector search path.
-  const qdrantResults = await searchPoints(vector, topK, scoreThreshold);
+      const rows = await db
+        .select({
+          id: chunks.id,
+          qdrantId: chunks.qdrantId,
+          documentId: chunks.documentId,
+          content: chunks.content,
+          originalName: documents.originalName,
+          createdAt: documents.createdAt,
+          sourceType: documents.sourceType,
+          mimeType: documents.mimeType,
+          sizeBytes: documents.sizeBytes,
+          startSecs: chunks.startSecs,
+          endSecs: chunks.endSecs,
+        })
+        .from(chunks)
+        .innerJoin(documents, eq(chunks.documentId, documents.id))
+        .where(inArray(chunks.qdrantId, qdrantIds));
 
-  // Fetch Postgres rows for vector hits.
-  let vectorChunks: RetrievedChunk[] = [];
-  if (qdrantResults.length > 0) {
-    const qdrantIds = qdrantResults.map((r) => r.id);
-    const scoreByQdrantId = new Map(qdrantResults.map((r) => [r.id, r.score]));
+      return rows
+        .map((row): RetrievedChunk | null => {
+          const contentScore = scoreByQdrantId.get(row.qdrantId);
+          if (contentScore === undefined) return null;
+          return {
+            chunkId: row.id,
+            qdrantId: row.qdrantId,
+            documentId: row.documentId,
+            documentName: row.originalName,
+            content: row.content,
+            score: contentScore,
+            createdAt: row.createdAt,
+            sourceType: row.sourceType,
+            mimeType: row.mimeType,
+            sizeBytes: row.sizeBytes ?? null,
+            startSecs: row.startSecs ?? null,
+            endSecs: row.endSecs ?? null,
+          };
+        })
+        .filter((c): c is RetrievedChunk => c !== null);
+    })(),
+    // Metadata SQL path: resolves to [] immediately if no classification/filters.
+    classification?.filters
+      ? retrieveByMetadata(classification.filters, topK)
+      : Promise.resolve([] as RetrievedChunk[]),
+  ]);
 
-    const rows = await db
-      .select({
-        id: chunks.id,
-        qdrantId: chunks.qdrantId,
-        documentId: chunks.documentId,
-        content: chunks.content,
-        originalName: documents.originalName,
-        createdAt: documents.createdAt,
-        sourceType: documents.sourceType,
-        mimeType: documents.mimeType,
-        sizeBytes: documents.sizeBytes,
-        startSecs: chunks.startSecs,
-        endSecs: chunks.endSecs,
-      })
-      .from(chunks)
-      .innerJoin(documents, eq(chunks.documentId, documents.id))
-      .where(inArray(chunks.qdrantId, qdrantIds));
-
-    vectorChunks = rows
-      .map((row): RetrievedChunk | null => {
-        const contentScore = scoreByQdrantId.get(row.qdrantId);
-        if (contentScore === undefined) return null;
-        return {
-          chunkId: row.id,
-          qdrantId: row.qdrantId,
-          documentId: row.documentId,
-          documentName: row.originalName,
-          content: row.content,
-          score: contentScore,
-          createdAt: row.createdAt,
-          sourceType: row.sourceType,
-          mimeType: row.mimeType,
-          sizeBytes: row.sizeBytes ?? null,
-          startSecs: row.startSecs ?? null,
-          endSecs: row.endSecs ?? null,
-        };
-      })
-      .filter((c): c is RetrievedChunk => c !== null);
-  }
+  if (vectorChunksOrNull === null) return { type: 'chunk_results', chunks: [] };
+  const vectorChunks = vectorChunksOrNull;
 
   // If no metadata filters, return vector results sorted by score.
   if (!classification) {
     return { type: 'chunk_results', chunks: vectorChunks.sort((a, b) => b.score - a.score) };
   }
-
-  // Metadata SQL path (search_content with filters).
-  const sqlChunks = await retrieveByMetadata(classification.filters ?? {}, topK);
 
   // Score fusion: merge both sets, combine content + metadata scores.
   type FusionEntry = { chunk: RetrievedChunk; contentScore: number; metadataScore: number };
