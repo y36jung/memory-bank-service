@@ -1,6 +1,6 @@
 [
   {
-    "id": "tc-01",
+    "id": "tc-08",
     "group": 1,
     "tags": ["single-chunk", "factual", "rest-api"],
     "question": "What does it mean for a REST API to be stateless?",
@@ -9,7 +9,7 @@
     "notes": "Single-chunk factual lookup. Answer should be fully contained within one chunk of rest_api_guide.md covering the Statelessness constraint."
   },
   {
-    "id": "tc-02",
+    "id": "tc-09",
     "group": 1,
     "tags": ["multi-chunk", "synthesis", "rest-api"],
     "question": "Summarize the six architectural constraints that define a REST API.",
@@ -18,7 +18,7 @@
     "notes": "Multi-chunk synthesis. Answer requires combining information from multiple chunks covering the six REST constraints."
   },
   {
-    "id": "tc-03",
+    "id": "tc-10",
     "group": 1,
     "tags": ["knowledge-bleed", "finance"],
     "question": "What is compound interest and how is it calculated?",
@@ -27,7 +27,7 @@
     "notes": "Implicit knowledge bleed test. finance_basics.md describes compound interest without giving a formula. GPT-4o may hallucinate the A=P(1+r/n)^nt formula from training data. Faithfulness should be <0.70."
   },
   {
-    "id": "tc-04",
+    "id": "tc-11",
     "group": 1,
     "tags": ["partial-info", "nutrition"],
     "question": "How much protein should a sedentary adult consume per day?",
@@ -36,7 +36,7 @@
     "notes": "Partial information test. nutrition_guide.md gives active-adult RDA (1.4-2.2 g/kg) but explicitly states sedentary adult guidance is not provided. Model should acknowledge the gap rather than fill it in."
   },
   {
-    "id": "tc-06",
+    "id": "tc-12",
     "group": 1,
     "tags": ["high-overlap", "rest-api"],
     "question": "What is the purpose of the uniform interface constraint in REST?",
@@ -45,7 +45,7 @@
     "notes": "High-overlap chunks test. The Uniform Interface section straddles a chunk boundary so two adjacent chunks both score above 0.5. Model should synthesize rather than repeat."
   },
   {
-    "id": "tc-07",
+    "id": "tc-13",
     "group": 2,
     "tags": ["cross-doc", "same-format", "investment"],
     "question": "How does dollar-cost averaging help a retirement investor reduce risk?",
@@ -54,7 +54,7 @@
     "notes": "Cross-document synthesis, same format. Answer requires combining DCA mechanics from investment_basics.md with retirement context from retirement_planning.md."
   },
   {
-    "id": "tc-10",
+    "id": "tc-14",
     "group": 2,
     "tags": ["vocab-mismatch", "rest-api"],
     "question": "Is a REST API connectionless between requests?",
@@ -63,7 +63,7 @@
     "notes": "Vocabulary mismatch test. Query uses 'connectionless'; the document uses 'stateless'. The Statelessness section of rest_api_guide.md includes a clarifying paragraph on stateless vs connectionless."
   },
   {
-    "id": "tc-11",
+    "id": "tc-15",
     "group": 2,
     "tags": ["topk-saturation", "rest-api"],
     "question": "What HTTP methods are explicitly listed as unsafe in the REST API guide?",
@@ -72,7 +72,7 @@
     "notes": "Top-k saturation test. The HTTP Methods section is placed late in rest_api_guide.md so the target chunk ranks 11th or later in Qdrant at topK=10. ContextPrecision and ContextRecall expected <0.30."
   },
   {
-    "id": "tc-12",
+    "id": "tc-16",
     "group": 2,
     "tags": ["rare-fact", "nutrition"],
     "question": "What is the recommended daily intake of selenium for adult women according to the nutrition guide?",
@@ -81,7 +81,7 @@
     "notes": "Rare/specific fact test. The selenium RDA (55 mcg/day) is buried mid-chunk in a long minerals section of nutrition_guide.md."
   },
   {
-    "id": "tc-13",
+    "id": "tc-17",
     "group": 2,
     "tags": ["chunk-boundary", "investment"],
     "question": "What are the tax advantages of contributing to an RRSP?",
@@ -90,7 +90,43 @@
     "notes": "Chunk boundary test. The three RRSP tax advantage facts straddle two consecutive chunks with 150-token overlap. Tests whether the retriever surfaces enough context to answer completely."
   },
   {
+    "id": "tc-18",
+    "group": 2,
+    "tags": ["paraphrase", "semantic-similarity", "factual", "nutrition"],
+    "question": "What's the recommended daily protein intake for people who work out?",
+    "fixture_docs": ["nutrition_guide.md"],
+    "ground_truth": "For active adults, the recommended protein intake is approximately 1.6–2.2 g/kg of body weight per day for men and 1.4–2.0 g/kg per day for women.",
+    "notes": "Paraphrased semantic query. The document uses 'active adults'; the query uses 'people who work out'. Tests whether the embedding model generalises across paraphrases rather than requiring an exact keyword match. Expects faithfulness > 0.85 and context_recall > 0.80."
+  },
+  {
     "id": "tc-19",
+    "group": 1,
+    "tags": ["negation", "implicit-reasoning", "single-doc"],
+    "question": "What does the investment guide say investors should avoid when markets fluctuate?",
+    "fixture_docs": ["investment_basics.md"],
+    "ground_truth": null,
+    "notes": "Negation / avoidance query. Cautionary guidance in investment_basics.md is framed positively (DCA eliminates the need to time the market) rather than as explicit prohibitions. Model must infer the implied 'avoid' from positive framing. Hallucination risk is high since GPT-4o has strong priors about market-timing advice. Expects faithfulness > 0.80; any advice not grounded in the retrieved chunks is a faithfulness failure."
+  },
+  {
+    "id": "tc-20",
+    "group": 2,
+    "tags": ["numerical", "exact-fact", "single-chunk", "factual"],
+    "question": "What is the maximum RRSP contribution limit for 2024?",
+    "fixture_docs": ["retirement_planning.md"],
+    "ground_truth": "$31,560",
+    "notes": "Exact numerical extraction. Tests retrieval and reporting of a specific dollar figure (not a range or formula). Any rounding, conversion, or paraphrasing that changes the value is a faithfulness or correctness failure. Expects answer_correctness > 0.90 and faithfulness > 0.90."
+  },
+  {
+    "id": "tc-21",
+    "group": 1,
+    "tags": ["procedural", "multi-chunk", "how-to"],
+    "question": "How does dollar-cost averaging work in practice? Walk me through the steps.",
+    "fixture_docs": ["investment_basics.md"],
+    "ground_truth": null,
+    "notes": "Procedural / how-to query. Tests whether the model correctly sequences and completes the steps described in investment_basics.md, including the $50/$40/$60 per-unit example that demonstrates cost averaging. Any steps added beyond what the document describes are a faithfulness failure. Expects faithfulness > 0.80."
+  },
+  {
+    "id": "tc-22",
     "group": 2,
     "tags": ["re-index", "idempotency", "rest-api"],
     "question": "What is the layered system constraint in REST?",
@@ -99,16 +135,7 @@
     "notes": "Re-index idempotency test. Run eval before and after deleting and re-uploading rest_api_guide.md. Scores should be identical within ±0.05."
   },
   {
-    "id": "tc-27",
-    "group": 1,
-    "tags": ["metadata", "file-size", "db-stored"],
-    "question": "How large is the nutrition guide file in bytes?",
-    "fixture_docs": ["nutrition_guide.md"],
-    "ground_truth": null,
-    "notes": "File-size metadata query. sizeBytes is stored in documents.size_bytes but is not embedded in any chunk. The model should acknowledge it cannot determine file size from available context rather than guessing. Like tc-26, this intentionally documents a system capability gap -- low faithfulness/relevancy scores are expected."
-  },
-  {
-    "id": "tc-28",
+    "id": "tc-23",
     "group": 2,
     "tags": ["metadata", "content-derived", "document-title", "rest-api"],
     "question": "What is the full title of the REST API document as it appears at the top of the document?",
@@ -117,7 +144,7 @@
     "notes": "Content-derived title metadata. The H1 header '# REST API Design Guide' is the first line of rest_api_guide.md and lands in the first chunk. Tests whether the model reads and reports the document's own title rather than paraphrasing or hallucinating."
   },
   {
-    "id": "tc-29",
+    "id": "tc-24",
     "group": 2,
     "tags": ["metadata", "content-derived", "citations", "nutrition"],
     "question": "What health or scientific authorities are referenced in the nutrition guide?",
