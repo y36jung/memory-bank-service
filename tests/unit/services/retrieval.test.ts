@@ -484,17 +484,20 @@ describe('score fusion — hybrid metadata + vector search', () => {
       keywordScore: METADATA_SCORE,
     };
 
-    // We need two separate db.select() calls:
-    // 1st: vector path — returns vectorRow via .where() (no orderBy/limit)
-    // 2nd: metadata path (retrieveByMetadata) — returns metadataRow via .limit()
+    // We need two separate db.select() calls.
+    // With parallelized retrieve(), retrieveByMetadata starts immediately while the
+    // vector chain first awaits batchEmbed + searchPoints, so the metadata chain
+    // calls db.select() FIRST.
+    // 1st: metadata path (retrieveByMetadata) — returns metadataRow via .limit()
+    // 2nd: vector path — returns vectorRow via .where() (no orderBy/limit)
     const vectorChain = makeSelectChain([vectorRow]);
     const metadataChain = makeMetadataSelectChain([metadataRow]);
 
     let callCount = 0;
     vi.mocked(db.select).mockImplementation(() => {
       callCount++;
-      if (callCount === 1) return vectorChain as unknown as ReturnType<typeof db.select>;
-      return metadataChain as unknown as ReturnType<typeof db.select>;
+      if (callCount === 1) return metadataChain as unknown as ReturnType<typeof db.select>;
+      return vectorChain as unknown as ReturnType<typeof db.select>;
     });
 
     const result = await retrieveChunks('foo document query');
