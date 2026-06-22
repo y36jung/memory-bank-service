@@ -1,0 +1,65 @@
+[
+  {
+    "id": "tc-01",
+    "group": 1,
+    "tags": ["conflict", "finance"],
+    "question": "How many months of expenses should an emergency fund cover?",
+    "fixture_docs": ["finance_basics.md", "finance_advanced.md"],
+    "ground_truth": null,
+    "notes": "Conflicting documents test. finance_basics.md says 3 months; finance_advanced.md says 6 months. Model should surface the conflict or hedge. Faithfulness expected 0.50-0.80."
+  },
+  {
+    "id": "tc-02",
+    "group": 2,
+    "tags": ["cross-doc", "mixed-format", "nutrition", "travel"],
+    "question": "What high-protein foods are suitable to pack for long-haul travel to Japan?",
+    "fixture_docs": ["nutrition_guide.md", "world_destinations.csv"],
+    "ground_truth": "High-protein travel-friendly foods include jerky, nuts, protein bars, and hard-boiled eggs. Japan does not restrict most food imports from Canada, but raw meats and fresh produce are prohibited. Pre-packaged, shelf-stable high-protein snacks such as jerky and protein bars are suitable for carry-on.",
+    "notes": "Cross-document mixed-format synthesis. Combines protein food list from nutrition_guide.md with Japan import restrictions from world_destinations.csv."
+  },
+  {
+    "id": "tc-03",
+    "group": 2,
+    "tags": ["out-of-scope", "negative"],
+    "question": "What is the current stock price of Apple Inc.?",
+    "fixture_docs": [],
+    "ground_truth": "I don't know based on the provided documents.",
+    "notes": "Out-of-scope query. No indexed document contains Apple stock price data. Model should say it doesn't know rather than hallucinate. Faithfulness expected >0.90."
+  },
+  {
+    "id": "tc-04",
+    "group": 2,
+    "tags": ["comparative", "cross-doc", "multi-chunk", "finance"],
+    "question": "What are the key differences between an RRSP and a TFSA for a Canadian saver?",
+    "fixture_docs": ["retirement_planning.md", "finance_advanced.md"],
+    "ground_truth": "RRSPs accept pre-tax contributions that reduce taxable income in the year contributed, with withdrawals taxed as income; RRSPs must be converted to a RRIF by age 71 and the 2024 contribution limit is 18% of prior-year income up to $31,560. TFSAs use after-tax contributions, so withdrawals are completely tax-free and withdrawn amounts are added back to contribution room the following year; cumulative TFSA room as of 2024 is $95,000.",
+    "notes": "Cross-doc structured comparison. Requires synthesising RRSP details from retirement_planning.md with TFSA details from finance_advanced.md into a coherent side-by-side answer. Expects context_recall > 0.75 and faithfulness > 0.85. A low context_recall score indicates the retriever failed to pull TFSA chunks from finance_advanced.md."
+  },
+  {
+    "id": "tc-05",
+    "group": 2,
+    "tags": ["lexical-decoy", "precision", "numerical-example", "investment"],
+    "question": "What specific numerical example does the investment guide use to show that DCA produces an average cost lower than the average unit price?",
+    "fixture_docs": ["investment_basics.md", "retirement_planning.md"],
+    "ground_truth": "The guide uses an example where you invest at unit prices of $50, $40, and $60. Because you buy more units when the price is lower ($40), your average cost per unit ends up below the simple average price of $50.",
+    "notes": "Lexical decoy / context precision test. DCA is mentioned in both investment_basics.md and retirement_planning.md, but the specific $50/$40/$60 mathematical example exists only in investment_basics.md. Tests whether the retriever surfaces the chunk with the precise example rather than the more general retirement-planning DCA mention. A low context_precision score indicates lexical contamination from the retirement doc. Expects context_precision > 0.70 and faithfulness > 0.85."
+  },
+  {
+    "id": "tc-06",
+    "group": 2,
+    "tags": ["cross-doc", "overlap", "multi-chunk", "tax", "finance"],
+    "question": "What are the tax implications of withdrawing money from a TFSA, and what happens to contribution room afterward?",
+    "fixture_docs": ["finance_advanced.md", "retirement_planning.md"],
+    "ground_truth": "TFSA withdrawals are completely tax-free because contributions are made with after-tax dollars. Any amount withdrawn is added back to your TFSA contribution room at the start of the following calendar year, meaning you can re-contribute that amount later.",
+    "notes": "Dense-corpus topic overlap test. TFSA is discussed in both finance_advanced.md (detailed) and retirement_planning.md (in comparison context). Tests whether the retriever prioritises the chunk with the specific withdrawal and room-restoration details over looser TFSA mentions. Expects faithfulness > 0.85 and context_precision > 0.70."
+  },
+  {
+    "id": "tc-07",
+    "group": 1,
+    "tags": ["broad-recall", "multi-doc", "multi-chunk", "travel", "cross-format"],
+    "question": "What food-related restrictions or entry requirements should a Canadian traveler know about when visiting Japan or Australia?",
+    "fixture_docs": ["nutrition_guide.md", "world_destinations.csv"],
+    "ground_truth": null,
+    "notes": "Multi-chunk broad recall across two document types. A complete answer requires: Japan customs rules from nutrition_guide.md (no raw meat or fresh produce; sealed commercial foods permitted) AND Australia biosecurity notes from both nutrition_guide.md and world_destinations.csv (strict biosecurity, ETA required). Group 1 because the answer spans too many chunks for a single canonical phrasing. Expects faithfulness > 0.80 and answer_relevancy > 0.80; a partial answer that omits one country or one document's contribution indicates a recall failure."
+  }
+]
