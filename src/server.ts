@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
+import cors from '@fastify/cors';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { fastifyErrorHandler } from './lib/errors.js';
 import { env } from './config/env.js';
@@ -15,6 +16,9 @@ export async function buildApp() {
   app.setSerializerCompiler(serializerCompiler);
   await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50 MB
   app.setErrorHandler(fastifyErrorHandler);
+  await app.register(cors, {
+    origin: env.NODE_ENV === 'development' ? ['http://localhost:3001'] : [],
+  });
 
   // Route registration
   await app.register(documentUploadRoutes, { prefix: '/api' });
