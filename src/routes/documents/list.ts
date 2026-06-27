@@ -1,6 +1,7 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
-import { eq } from 'drizzle-orm';
+import { and, eq, ilike, count, inArray } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { documents, chunks, ingestionJobs } from '../../db/schema.js';
 import { deleteObject } from '../../services/storage.js';
@@ -10,11 +11,51 @@ import { sendSuccess, AppError } from '../../lib/errors.js';
 import { randomUUID } from 'node:crypto';
 
 export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
-  // GET /documents — list all documents with status
-  app.get('/documents', async (_request, reply) => {
-    const docs = await db.select().from(documents).orderBy(documents.createdAt);
-    sendSuccess(reply, docs);
-  });
+  // GET /documents — list all documents with optional search filter and pagination
+  app.get(
+    '/documents',
+    {
+      schema: {
+        querystring: z.object({
+          search: z.string().optional(),
+          status: z.preprocess(
+            (val) => (val === undefined ? undefined : Array.isArray(val) ? val : [val]),
+            z.array(z.enum(['pending', 'processing', 'indexed', 'failed'])).optional(),
+          ),
+          page: z.coerce.number().int().positive().default(1),
+          limit: z.coerce.number().int().min(1).max(100).default(20),
+        }),
+      },
+    },
+    async (request, reply) => {
+      const { search, status, page, limit } = request.query;
+
+      const conditions: SQL[] = [];
+      if (search) conditions.push(ilike(documents.originalName, `%${search}%`));
+      if (status && status.length > 0) conditions.push(inArray(documents.status, status));
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [items, countRows] = await Promise.all([
+        db
+          .select()
+          .from(documents)
+          .where(whereClause)
+          .orderBy(documents.createdAt)
+          .limit(limit)
+          .offset((page - 1) * limit),
+        db.select({ total: count() }).from(documents).where(whereClause),
+      ]);
+
+      const total = Number(countRows[0]?.total ?? 0);
+      sendSuccess(reply, {
+        items,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      });
+    },
+  );
 
   // GET /documents/:id — single document + full job history
   app.get(
