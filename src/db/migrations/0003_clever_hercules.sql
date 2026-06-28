@@ -1,0 +1,1 @@
+ALTER TABLE "chunks" ADD COLUMN "page_number" integer;

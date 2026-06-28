@@ -43,6 +43,17 @@ export async function uploadStream(
  * Throws AppError('S3_NOT_FOUND', ..., 404) if the key does not exist.
  */
 export async function getStream(key: string): Promise<Readable> {
+  const { stream } = await getStreamWithLength(key);
+  return stream;
+}
+
+/**
+ * Return a Readable stream and the S3 ContentLength for an object.
+ * Throws AppError('S3_NOT_FOUND', ..., 404) if the key does not exist.
+ */
+export async function getStreamWithLength(
+  key: string,
+): Promise<{ stream: Readable; contentLength: number | null }> {
   try {
     const response = await s3.send(
       new GetObjectCommand({
@@ -51,21 +62,19 @@ export async function getStream(key: string): Promise<Readable> {
       }),
     );
 
+    const contentLength = response.ContentLength ?? null;
+
     if (!(response.Body instanceof Readable)) {
-      // In Node.js the AWS SDK v3 returns an IncomingMessage/Readable for GetObject.
-      // Cast via the sdk's transformToWebStream or directly if already Readable.
       const body = response.Body;
       if (body == null) {
         throw new AppError('S3_NOT_FOUND', 'Object not found', 404);
       }
-      // body is a SdkStream which is Readable-compatible in Node; cast it.
-      return body as unknown as Readable;
+      return { stream: body as unknown as Readable, contentLength };
     }
 
-    return response.Body;
+    return { stream: response.Body, contentLength };
   } catch (err) {
     if (err instanceof AppError) throw err;
-    // AWS SDK throws a shaped error with a $metadata.httpStatusCode or a name property.
     const name = (err as { name?: string }).name ?? '';
     if (name === 'NoSuchKey' || name === 'NotFound') {
       throw new AppError('S3_NOT_FOUND', 'Object not found', 404);
