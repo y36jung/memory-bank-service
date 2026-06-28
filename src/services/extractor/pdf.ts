@@ -1,9 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
-// Disable worker in Node.js — prevents pdfjs from attempting to spawn a browser
-// worker thread that would require browser-only globals.
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
 /**
  * Extract plain text from a PDF buffer using pdfjs-dist (legacy Node build).
  * Pages are joined with '\n\n'. Returns '' for PDFs with no extractable text
