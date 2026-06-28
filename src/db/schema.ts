@@ -54,6 +54,7 @@ export const chunks = pgTable('chunks', {
   chunkIndex: integer('chunk_index').notNull(),
   content: text('content').notNull(),
   tokenCount: integer('token_count').notNull(),
+  pageNumber: integer('page_number'),
   startSecs: real('start_secs'),
   endSecs: real('end_secs'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

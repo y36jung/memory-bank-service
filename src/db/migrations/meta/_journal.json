@@ -22,6 +22,13 @@
       "when": 1750291200000,
       "tag": "0002_add_chunk_time_bounds",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782604549215,
+      "tag": "0003_clever_hercules",
+      "breakpoints": true
     }
   ]
 }

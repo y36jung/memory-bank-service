@@ -41,3 +41,37 @@ export async function extractPdf(buffer: Buffer): Promise<string> {
 
   return pageTexts.join('\n\n');
 }
+
+/**
+ * Same as extractPdf but returns one string per page instead of joining them.
+ * Used by the document content endpoint to serve per-page PDF content.
+ */
+export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    useSystemFonts: false,
+    disableFontFace: true,
+  });
+
+  const pdfDocument = await loadingTask.promise;
+  const numPages = pdfDocument.numPages;
+  const pageTexts: string[] = [];
+
+  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    const page = await pdfDocument.getPage(pageNum);
+    const textContent = await page.getTextContent();
+
+    const pageText = textContent.items
+      .filter((item): item is typeof item & { str: string } => 'str' in item)
+      .map((item) => item.str)
+      .join('');
+
+    pageTexts.push(pageText);
+    page.cleanup();
+  }
+
+  await pdfDocument.cleanup();
+
+  return pageTexts;
+}

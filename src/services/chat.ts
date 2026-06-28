@@ -34,6 +34,7 @@ export interface Source {
   documentId: string;
   documentName: string;
   score?: number;
+  pageNumber?: number | null;
 }
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -167,6 +168,7 @@ export async function streamChatResponse(
       documentId: c.documentId,
       documentName: c.documentName,
       score: c.score,
+      pageNumber: c.pageNumber,
     }));
   }
 

@@ -22,6 +22,7 @@ export interface RetrievedChunk {
   sourceType: string; // documents.source_type
   mimeType: string; // documents.mime_type
   sizeBytes: number | null; // documents.size_bytes
+  pageNumber: number | null; // chunks.page_number
   startSecs: number | null; // chunks.start_secs
   endSecs: number | null; // chunks.end_secs
 }
@@ -127,6 +128,7 @@ async function retrieveByMetadata(filters: MetadataFilters, limit = 10): Promise
       sourceType: documents.sourceType,
       mimeType: documents.mimeType,
       sizeBytes: documents.sizeBytes,
+      pageNumber: chunks.pageNumber,
       startSecs: chunks.startSecs,
       endSecs: chunks.endSecs,
       keywordScore: keywordScoreExpr.as('keyword_score'),
@@ -148,6 +150,7 @@ async function retrieveByMetadata(filters: MetadataFilters, limit = 10): Promise
     sourceType: row.sourceType,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes ?? null,
+    pageNumber: row.pageNumber ?? null,
     startSecs: row.startSecs ?? null,
     endSecs: row.endSecs ?? null,
   }));
@@ -256,6 +259,7 @@ export async function retrieve(
           sourceType: documents.sourceType,
           mimeType: documents.mimeType,
           sizeBytes: documents.sizeBytes,
+          pageNumber: chunks.pageNumber,
           startSecs: chunks.startSecs,
           endSecs: chunks.endSecs,
         })
@@ -278,6 +282,7 @@ export async function retrieve(
             sourceType: row.sourceType,
             mimeType: row.mimeType,
             sizeBytes: row.sizeBytes ?? null,
+            pageNumber: row.pageNumber ?? null,
             startSecs: row.startSecs ?? null,
             endSecs: row.endSecs ?? null,
           };

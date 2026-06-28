@@ -3,7 +3,7 @@ import { fileTypeFromBuffer } from 'file-type';
 import * as storage from '../storage.js';
 import { AppError } from '../../lib/errors.js';
 import { env } from '../../config/env.js';
-import { extractPdf } from './pdf.js';
+import { extractPdfPages } from './pdf.js';
 import { extractDocx } from './docx.js';
 import { extractSpreadsheet } from './spreadsheet.js';
 import { extractImage } from './image.js';
@@ -49,6 +49,7 @@ export interface ExtractOptions {
 export interface ExtractionResult {
   text: string;
   segments?: TranscribedSegment[]; // only populated for audio/video
+  pages?: string[]; // only populated for PDFs — one string per page
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +143,8 @@ export async function extractText(
 
     case SUPPORTED_MIME_TYPES.APPLICATION_PDF: {
       const buf = await streamToBuffer(stream);
-      return { text: await extractPdf(buf) };
+      const pageTexts = await extractPdfPages(buf);
+      return { text: pageTexts.join('\n\n'), pages: pageTexts };
     }
 
     case SUPPORTED_MIME_TYPES.APPLICATION_DOCX: {

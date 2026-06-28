@@ -23,7 +23,11 @@ interface MediaChunk extends Chunk {
   endSecs: number;
 }
 
-type IngestChunk = Chunk | MediaChunk;
+interface PageChunk extends Chunk {
+  pageNumber: number;
+}
+
+type IngestChunk = Chunk | MediaChunk | PageChunk;
 
 // ─── Media chunking ────────────────────────────────────────────────────────────
 
@@ -150,11 +154,19 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
   );
 
   // Step 4 CHUNK (synchronous — no timeout per PLAN.md).
-  // Fork: media path (segments present) vs text path.
-  const produced: IngestChunk[] =
-    extraction.segments && extraction.segments.length > 0
-      ? chunkSegments(extraction.segments)
-      : chunkText(extraction.text);
+  // Three-way fork: media (segments) → PDF (pages with page numbers) → plain text.
+  let produced: IngestChunk[];
+
+  if (extraction.segments && extraction.segments.length > 0) {
+    produced = chunkSegments(extraction.segments);
+  } else if (extraction.pages && extraction.pages.length > 0) {
+    const perPage = extraction.pages.flatMap((pageText, i) =>
+      chunkText(pageText).map((c): PageChunk => ({ ...c, pageNumber: i + 1 })),
+    );
+    produced = perPage.map((c, idx) => ({ ...c, chunkIndex: idx }));
+  } else {
+    produced = chunkText(extraction.text);
+  }
 
   // Step 5 EMBED (30s timeout per batch).
   const vectors = await withTimeout(batchEmbed(produced.map((c) => c.content)), 30_000, 'embed');
@@ -172,6 +184,7 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
           chunkIndex: c.chunkIndex,
           content: c.content,
           tokenCount: c.tokenCount,
+          pageNumber: (c as PageChunk).pageNumber ?? null,
           startSecs: (c as MediaChunk).startSecs ?? null,
           endSecs: (c as MediaChunk).endSecs ?? null,
         })),
