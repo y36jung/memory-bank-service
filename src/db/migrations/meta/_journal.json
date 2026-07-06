@@ -29,6 +29,13 @@
       "when": 1782604549215,
       "tag": "0003_clever_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783303768182,
+      "tag": "0004_real_santa_claus",
+      "breakpoints": true
     }
   ]
 }

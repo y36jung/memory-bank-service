@@ -14,16 +14,6 @@ const envSchema = z.object({
   S3_BUCKET_NAME: z.string(),
   OPENAI_API_KEY: z.string().startsWith('sk-'),
   JWT_SECRET: z.string().min(32),
-  // OAuth vars are optional in M1 (M3-4)
-  GOOGLE_CLIENT_ID: z.string().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_REDIRECT_URI: z.string().url().optional(),
-  OAUTH_ENCRYPTION_KEY: z
-    .string()
-    .regex(/^[0-9a-fA-F]{64}$/)
-    .optional(),
-  MICROSOFT_CLIENT_ID: z.string().optional(),
-  MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MAX_FILE_SIZE_BYTES: z.coerce.number().default(524_288_000),
   MEDIA_EXTRACT_TIMEOUT_MS: z.coerce.number().default(600_000),
   VISION_TIMEOUT_MS: z.coerce.number().default(60_000),

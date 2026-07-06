@@ -2,7 +2,9 @@
 
 ## Overview
 
-Memory Bank is a single-user RAG-powered backend service that lets you chat with your personal knowledge base: uploaded documents, emails (Gmail, Outlook), and cloud files (Google Drive, OneDrive). The service ingests content from all these sources, chunks and embeds it, stores vectors in Qdrant, and answers natural-language questions using GPT-4o with retrieved context.
+Memory Bank is a single-user RAG-powered backend service that lets you chat with your personal knowledge base of uploaded documents. The service ingests content, chunks and embeds it, stores vectors in Qdrant, and answers natural-language questions using GPT-4o with retrieved context.
+
+Email (Gmail, Outlook) and cloud file (Google Drive, OneDrive) ingestion via OAuth was originally scoped as Milestones 3 & 4, but has been deferred — see [Future Additions](#future-additions).
 
 ---
 
@@ -21,8 +23,6 @@ Memory Bank is a single-user RAG-powered backend service that lets you chat with
 | Embeddings          | OpenAI text-embedding-3-large | 3072-dim, best retrieval quality in the OpenAI lineup                                                                  |
 | Audio Transcription | OpenAI Whisper                | Milestone 2                                                                                                            |
 | Vision / OCR        | OpenAI GPT-4o Vision          | Milestone 2                                                                                                            |
-| Google OAuth        | `googleapis` SDK              | Milestone 3                                                                                                            |
-| Microsoft OAuth     | `@azure/msal-node`            | Milestone 4                                                                                                            |
 | Validation          | Zod                           | Runtime schema validation; integrated with Fastify via `fastify-type-provider-zod`                                     |
 | Config              | `dotenv` + `zod` env schema   | Fails fast on missing env vars at startup                                                                              |
 | Testing             | Vitest                        | Fast, ESM-native, great TypeScript support                                                                             |
@@ -37,7 +37,7 @@ Client (HTTP/SSE)
         ▼
    Fastify API
   ┌────────────────────────────────────────────────────┐
-  │  Routes: /documents, /chat, /oauth, /webhooks      │
+  │  Routes: /documents, /chat                          │
   └────────────┬───────────────────────────────────────┘
                │
      ┌─────────┴──────────┐
@@ -72,7 +72,7 @@ Postgres    Qdrant
 
 ### `documents`
 
-Tracks every ingested source — whether uploaded, synced from Gmail, Google Drive, etc.
+Tracks every ingested source. Currently only `upload` is active; `gmail` | `gdrive` | `outlook` | `onedrive` are reserved for the deferred OAuth work (see [Future Additions](#future-additions)).
 
 ```typescript
 export const documents = pgTable('documents', {
@@ -157,20 +157,7 @@ export const messages = pgTable('messages', {
 });
 ```
 
-### `oauth_tokens` _(Milestone 3 & 4)_
-
-```typescript
-export const oauthTokens = pgTable('oauth_tokens', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  provider: providerEnum('provider').notNull(), // 'google' | 'microsoft'
-  accessToken: text('access_token').notNull(), // encrypted at rest
-  refreshToken: text('refresh_token'),
-  expiresAt: timestamp('expires_at'),
-  scope: text('scope'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-```
+`oauth_tokens` has been removed for now — see [Future Additions](#future-additions) for its schema.
 
 ---
 
@@ -195,7 +182,6 @@ const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise
 ```
 1. RECEIVE
    Upload → multipart → S3 (raw file)
-   OAuth sync → fetch content from provider API
 
 2. REGISTER (Postgres transaction)
    INSERT document (status = 'pending')
@@ -380,20 +366,7 @@ event: done
 data: {"messageId": "...", "sources": [{"documentName": "...", "chunkIndex": 0, "score": 0.87}]}
 ```
 
-### OAuth _(Milestones 3 & 4)_
-
-| Method   | Path                        | Description                                        |
-| -------- | --------------------------- | -------------------------------------------------- |
-| `GET`    | `/oauth/google/init`        | Redirect to Google consent screen                  |
-| `GET`    | `/oauth/google/callback`    | Handle code exchange; store tokens                 |
-| `POST`   | `/oauth/google/sync`        | Trigger Gmail + Drive sync job                     |
-| `GET`    | `/oauth/google/status`      | Token validity + last sync time                    |
-| `DELETE` | `/oauth/google/revoke`      | Revoke tokens + optionally delete synced documents |
-| `GET`    | `/oauth/microsoft/init`     | Redirect to Microsoft consent screen               |
-| `GET`    | `/oauth/microsoft/callback` | Handle code exchange; store tokens                 |
-| `POST`   | `/oauth/microsoft/sync`     | Trigger Outlook + OneDrive sync job                |
-| `GET`    | `/oauth/microsoft/status`   | Token validity + last sync time                    |
-| `DELETE` | `/oauth/microsoft/revoke`   | Revoke tokens                                      |
+OAuth endpoints have been removed for now — see [Future Additions](#future-additions) for the deferred API surface.
 
 ---
 
@@ -411,8 +384,7 @@ memory-bank/
 │   ├── queue/
 │   │   ├── index.ts            # BullMQ setup
 │   │   └── workers/
-│   │       ├── ingestion.worker.ts
-│   │       └── oauth-sync.worker.ts   # Milestones 3 & 4
+│   │       └── ingestion.worker.ts
 │   ├── services/
 │   │   ├── storage.ts          # S3 operations
 │   │   ├── qdrant.ts           # Qdrant client wrapper
@@ -434,12 +406,9 @@ memory-bank/
 │   │   │   ├── upload.ts
 │   │   │   ├── list.ts
 │   │   │   └── delete.ts
-│   │   ├── chat/
-│   │   │   ├── sessions.ts
-│   │   │   └── messages.ts
-│   │   └── oauth/              # Milestones 3 & 4
-│   │       ├── google.ts
-│   │       └── microsoft.ts
+│   │   └── chat/
+│   │       ├── sessions.ts
+│   │       └── messages.ts
 │   ├── lib/
 │   │   ├── errors.ts           # AppError class + Fastify error handler
 │   │   ├── tokenizer.ts        # tiktoken wrapper
@@ -514,11 +483,51 @@ memory-bank/
 
 ---
 
-### Milestone 3 — Gmail and Google Drive OAuth
+Milestones 3 & 4 (Gmail/Drive and Outlook/OneDrive OAuth) were originally scoped here but have been deferred — see [Future Additions](#future-additions).
 
-**Goal:** Sync emails and Drive files into the knowledge base via OAuth 2.0.
+---
 
-**Deliverables:**
+## Future Additions
+
+These are recommended next steps once the core service is stable.
+
+**1. Multi-tenancy**
+Add a `users` table, attach all resources to a `user_id`, and enforce row-level security in Postgres. Add JWT/session auth (e.g., `@fastify/jwt` + `better-auth` or Clerk). Qdrant supports filtering by payload field, so per-user isolation is just a `must` filter on `userId` in every search.
+
+**2. OAuth Integration (Gmail, Google Drive, Outlook, OneDrive)**
+Deferred to reduce initial scope — was originally Milestones 3 & 4. Revisit once the core single-source (upload) pipeline and multi-tenancy are stable, since OAuth tokens and synced documents need to be scoped per-user from the start.
+
+_Schema:_
+
+```typescript
+export const oauthTokens = pgTable('oauth_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  provider: providerEnum('provider').notNull(), // 'google' | 'microsoft'
+  accessToken: text('access_token').notNull(), // encrypted at rest
+  refreshToken: text('refresh_token'),
+  expiresAt: timestamp('expires_at'),
+  scope: text('scope'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+```
+
+_API surface:_
+
+| Method   | Path                        | Description                                        |
+| -------- | --------------------------- | -------------------------------------------------- |
+| `GET`    | `/oauth/google/init`        | Redirect to Google consent screen                  |
+| `GET`    | `/oauth/google/callback`    | Handle code exchange; store tokens                 |
+| `POST`   | `/oauth/google/sync`        | Trigger Gmail + Drive sync job                     |
+| `GET`    | `/oauth/google/status`      | Token validity + last sync time                    |
+| `DELETE` | `/oauth/google/revoke`      | Revoke tokens + optionally delete synced documents |
+| `GET`    | `/oauth/microsoft/init`     | Redirect to Microsoft consent screen               |
+| `GET`    | `/oauth/microsoft/callback` | Handle code exchange; store tokens                 |
+| `POST`   | `/oauth/microsoft/sync`     | Trigger Outlook + OneDrive sync job                |
+| `GET`    | `/oauth/microsoft/status`   | Token validity + last sync time                    |
+| `DELETE` | `/oauth/microsoft/revoke`   | Revoke tokens                                      |
+
+**Gmail and Google Drive (originally Milestone 3):**
 
 1. Google OAuth 2.0 flow (`googleapis` SDK): consent screen → code exchange → store encrypted tokens in `oauth_tokens`
 2. Token refresh middleware: auto-refresh access tokens before expiry on every sync
@@ -537,20 +546,9 @@ memory-bank/
 6. Incremental sync: track `lastSyncedAt` in `oauth_tokens`, only fetch items modified since then
 7. `DELETE /oauth/google/revoke`: revoke tokens via Google API + optionally delete all sourced documents
 
-**Key technical considerations for M3:**
+Key technical considerations: store tokens encrypted at rest (`node:crypto` AES-256-GCM, key derived from an env secret); request only `gmail.readonly` and `drive.readonly` scopes; run Drive exports in the BullMQ worker, not the request handler; treat Gmail threads as a unit (ingest the full thread as one document to preserve conversational context).
 
-- Store tokens encrypted at rest. Use `node:crypto` AES-256-GCM with a key derived from an env secret.
-- Request only the OAuth scopes you actually need: `gmail.readonly` and `drive.readonly`.
-- Google Drive export for large Docs can be slow. Run exports in the BullMQ worker, not in the request handler.
-- Treat Gmail threads as a unit: ingest the full thread as one document, not individual messages, to preserve conversational context.
-
----
-
-### Milestone 4 — Outlook and OneDrive OAuth
-
-**Goal:** Mirror Gmail/Drive functionality for Microsoft's ecosystem.
-
-**Deliverables:**
+**Outlook and OneDrive (originally Milestone 4):**
 
 1. Microsoft OAuth 2.0 via `@azure/msal-node`: Azure app registration → consent → token storage
 2. **Outlook sync worker (Microsoft Graph API):**
@@ -564,23 +562,9 @@ memory-bank/
 4. Incremental sync via Graph API `$filter=lastModifiedDateTime gt {lastSyncedAt}`
 5. `DELETE /oauth/microsoft/revoke`: revoke via Graph API logout endpoint
 
-**Key technical considerations for M4:**
+Key technical considerations: the Graph API uses a different auth endpoint per tenant (use the `common` authority for personal accounts); OneDrive downloads require the Graph API's `/content` endpoint, not `webUrl`; strip quoted-reply threads from Outlook bodies before chunking; `msal-node`'s `acquireTokenSilent` handles token refresh automatically.
 
-- The Microsoft Graph API uses a different auth endpoint per tenant. Use the `common` authority for personal accounts.
-- OneDrive downloads require an authenticated redirect — use the Graph API's `/content` endpoint, not the `webUrl`.
-- Outlook message bodies often contain long quoted threads. Apply a quoted-reply stripper before chunking to reduce noise (regex-based is sufficient).
-- The Microsoft token refresh flow differs slightly from Google's. `msal-node` handles this automatically with `acquireTokenSilent`.
-
----
-
-## Future Additions
-
-These are recommended next steps once the core service is stable.
-
-**1. Multi-tenancy**
-Add a `users` table, attach all resources to a `user_id`, and enforce row-level security in Postgres. Add JWT/session auth (e.g., `@fastify/jwt` + `better-auth` or Clerk). Qdrant supports filtering by payload field, so per-user isolation is just a `must` filter on `userId` in every search.
-
-**2. Frontend UI**
+**3. Frontend UI**
 A Next.js 15 app (App Router) with:
 
 - Chat interface (streaming responses via SSE)
@@ -588,22 +572,22 @@ A Next.js 15 app (App Router) with:
 - OAuth connection manager
 - Source citation viewer (click a source to see the original chunk in context)
 
-**3. Hybrid Search**
+**4. Hybrid Search**
 Combine dense vector search (Qdrant) with sparse BM25 keyword search. Qdrant supports sparse vectors natively (as of v1.7). Merge results with Reciprocal Rank Fusion (RRF) before the reranking step. Dramatically improves recall for queries with rare keywords, names, and identifiers.
 
-**4. Reranking**
+**5. Reranking**
 Add Cohere Rerank or a local cross-encoder (e.g., `ms-marco-MiniLM`) as a post-retrieval step before context assembly. Improves precision when top-k retrieval returns noisy results.
 
-**5. Slack Integration**
+**6. Slack Integration**
 Use the Slack Web API to ingest channel messages and thread history. Treat each thread as a document. Useful for teams repurposing this as a shared knowledge base.
 
-**6. Notion Integration**
+**7. Notion Integration**
 Notion's public API supports reading pages and databases. Chunk pages as documents; use database row properties as metadata for structured filtering.
 
-**7. GitHub Integration**
+**8. GitHub Integration**
 Ingest repo contents (READMEs, code files, issues, PR descriptions) via the GitHub REST API. Useful for a developer memory bank. Code files benefit from syntax-aware chunking (split by function/class, not token count).
 
-**8. Webhook-based Incremental Sync**
+**9. Webhook-based Incremental Sync**
 Replace polling-based Gmail/Drive sync with push notifications:
 
 - Gmail: Pub/Sub topic via `users.watch`
@@ -611,11 +595,11 @@ Replace polling-based Gmail/Drive sync with push notifications:
 - Microsoft Graph: `subscriptions` change notifications
   Reduces sync latency from minutes to seconds.
 
-**9. Document Versioning**
+**10. Document Versioning**
 Track versions of synced documents. When a Drive file is re-synced, diff the new extracted text against the old version. Only re-embed changed chunks. Reduces unnecessary embedding API calls and keeps vector indexes clean.
 
-**10. Conversation Memory (Episodic)**
+**11. Conversation Memory (Episodic)**
 Store a compressed summary of each chat session and inject it into subsequent sessions as a "memory" context block. Uses GPT-4o to summarize sessions on close. Gives the assistant long-term recall across conversations, not just within one session.
 
-**11. MCP Server Exposure**
+**12. MCP Server Exposure**
 Expose the RAG query endpoint as a Model Context Protocol (MCP) server. This lets Claude Desktop, Cursor, and other MCP-compatible tools query your Memory Bank as a tool call — turning it into a personal knowledge layer for any AI assistant you use.

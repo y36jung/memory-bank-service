@@ -24,7 +24,7 @@ Upon ingestion, automated flows should run to properly organise bits of informat
 
 ## 🎯 Technical Solution
 
-Build a RAG backend that ingests content from every personal knowledge source — file uploads, Gmail, Google Drive, Outlook, and OneDrive — indexes it, and answers natural-language questions with cited sources.
+Build a RAG backend that ingests content from personal knowledge sources — starting with file uploads, with email and cloud-drive sync (Gmail, Google Drive, Outlook, OneDrive) planned as a future addition — indexes it, and answers natural-language questions with cited sources.
 
 ## 📋 Product Specifications
 
@@ -38,18 +38,17 @@ Build a RAG backend that ingests content from every personal knowledge source �
 
 ## 📖 Description
 
-Memory Bank ingests content from multiple sources (file uploads, Gmail, Google Drive), chunks and embeds it using OpenAI, and answers natural-language questions with GPT-4o over a streaming SSE response. Postgres is the single source of truth for all content; Qdrant serves as the vector index and is fully rebuildable at any time.
+Memory Bank ingests content from file uploads, chunks and embeds it using OpenAI, and answers natural-language questions with GPT-4o over a streaming SSE response. Postgres is the single source of truth for all content; Qdrant serves as the vector index and is fully rebuildable at any time.
 
 Built with: **Node.js + TypeScript**, **Fastify**, **Drizzle ORM**, **PostgreSQL**, **Qdrant**, **BullMQ + Redis**, **AWS S3**, **OpenAI GPT-4o + Whisper + text-embedding-3-large**.
 
 ## ✨ Key Features
 
-- 📥 **Multi-source ingestion** — upload files (`.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.xlsx`) or sync from Gmail, Google Drive, Outlook, and OneDrive via OAuth 2.0
+- 📥 **File upload ingestion** — upload files (`.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.xlsx`); email/cloud-drive sync (Gmail, Google Drive, Outlook, OneDrive) is planned as a future addition
 - 🎙️ **Media support** — audio transcription via Whisper, image/video understanding via GPT-4o Vision
 - 🔄 **Durable ingestion pipeline** — BullMQ-backed 11-step pipeline with per-step timeouts, automatic retries, and a supervisor backstop
 - 💬 **Streaming RAG** — real-time GPT-4o answers with cited sources streamed over SSE
 - 🔁 **Idempotent vector indexing** — deterministic Qdrant point IDs (`uuidv5(documentId + chunkIndex)`) make retries safe with no duplicates
-- 🔐 **Encrypted OAuth tokens** — access/refresh tokens stored with AES-256-GCM encryption at rest
 
 ## 🚀 Installation & Usage
 
@@ -60,7 +59,6 @@ Built with: **Node.js + TypeScript**, **Fastify**, **Drizzle ORM**, **PostgreSQL
 - `ffmpeg` (required for audio/video extraction)
 - AWS S3 bucket and credentials
 - OpenAI API key
-- Google OAuth credentials (for Gmail/Drive sync)
 
 ### 1. Clone and install
 
