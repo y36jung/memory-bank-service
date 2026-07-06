@@ -9,16 +9,16 @@ grounding are.
 
 1. Read @PLAN.md in full. Every invariant you cite in any agent file must be quoted (or
    paraphrased verbatim) from it — never from training knowledge or generic best practice.
-2. Read the generator spec end to end. Internalize the role split (solution-architect designs;
+2. Read the generator spec end to end. Internalize the role split (slice-planner designs;
    executors only implement) and the plan output contract.
 
 ## Batched execution — pause for review between batches
 
 ### Batch 1 — architecture spine (2 files)
 
-Write solution-architect and orchestrator only. Then output, in chat (not as files):
+Write slice-planner and orchestrator only. Then output, in chat (not as files):
 
-- The plan output contract exactly as it appears inside solution-architect.
+- The plan output contract exactly as it appears inside slice-planner.
 - The routing table exactly as it appears inside orchestrator.
   Wait for my approval. If I correct either, regenerate batch 1 before moving on. These two
   files are the contract every other agent inherits; getting them right here removes defects
@@ -53,8 +53,8 @@ Write test-verification and review-security.
 ## Non-negotiable quality bar (self-check each file before emitting)
 
 - Every executor's "Plan-gap protocol" contains a literal "HARD STOP" and routes back to
-  solution-architect. Zero improvisation language anywhere in any executor.
-- solution-architect reproduces the full plan output contract from the generator spec — all
+  slice-planner. Zero improvisation language anywhere in any executor.
+- slice-planner reproduces the full plan output contract from the generator spec — all
   ten numbered items, in order.
 - Every description uses "Use PROACTIVELY" or "MUST BE USED" phrasing that makes the
   orchestrator's delegation deterministic and unambiguous.

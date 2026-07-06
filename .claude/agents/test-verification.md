@@ -60,7 +60,7 @@ Classification rationale: <why this is a plan-defect or implementation-defect>
 **Classification rules:**
 
 - **plan-defect**: the tested behavior is unspecified or contradicted in the approved plan —
-  route to `solution-architect`.
+  route to `slice-planner`.
 - **implementation-defect**: the tested behavior is specified in the plan but the implementation
   is wrong — route to the executor that owns the failing file (use the boundary audit table).
 

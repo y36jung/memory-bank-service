@@ -78,7 +78,7 @@ All files are new.
 | create | `src/queue/workers/ingestion.worker.ts` | ingestion-orchestration |
 | create | `src/services/ingestion.ts`             | ingestion-orchestration |
 
-**Boundary note on `src/lib/utils.ts`**: This file is purely additive and does not touch foundation-infra-owned files. future changes to `utils.ts` that affect other slices must route back to solution-architect.
+**Boundary note on `src/lib/utils.ts`**: This file is purely additive and does not touch foundation-infra-owned files. future changes to `utils.ts` that affect other slices must route back to slice-planner.
 
 ---
 
@@ -329,7 +329,7 @@ const supervisorHandle = startSupervisor();
 | `batchEmbed(texts): Promise<number[][]>`                                               | m1-chunking-embedding |
 | `upsertPoints(points): Promise<void>`, `deleteByDocumentId(documentId): Promise<void>` | m1-chunking-embedding |
 
-If any imported signature differs from the above, executor HARD STOPs and routes back to solution-architect.
+If any imported signature differs from the above, executor HARD STOPs and routes back to slice-planner.
 
 ---
 

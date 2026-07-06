@@ -61,7 +61,7 @@ Remediation: <what must change to resolve the finding>
 **Classification rules:**
 
 - **plan-defect**: the security invariant is absent from or contradicted by the approved plan —
-  route to `solution-architect`.
+  route to `slice-planner`.
 - **implementation-defect**: the invariant is in the plan but the code violates it — route to
   the executor that owns the file (use the boundary audit table).
 

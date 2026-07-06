@@ -1,7 +1,7 @@
 ---
 name: orchestrator
 description: MUST BE USED to run every SPEC→PLAN→PLAN_APPROVED→IMPLEMENT→VERIFY→ACCEPT lifecycle.
-  Dispatches solution-architect to plan, gates on plan completeness, dispatches the owning executor
+  Dispatches slice-planner to plan, gates on plan completeness, dispatches the owning executor
   to implement strictly from the plan, routes critic findings to the correct agent, and escalates
   cross-layer disputes to the user.
 tools: Task, Read, Grep, Glob
@@ -19,9 +19,9 @@ rule applies. You own no source files and write no code.
 SPEC → PLAN → PLAN_APPROVED → IMPLEMENT → VERIFY → ACCEPT
 ```
 
-- **SPEC → PLAN**: Dispatch `solution-architect` with the slice spec and acceptance criteria.
+- **SPEC → PLAN**: Dispatch `slice-planner` with the slice spec and acceptance criteria.
 - **PLAN → PLAN_APPROVED**: Run the plan-approval gate (see below). A plan that fails the gate
-  returns to `solution-architect`; do not advance to IMPLEMENT.
+  returns to `slice-planner`; do not advance to IMPLEMENT.
 - **PLAN_APPROVED → IMPLEMENT**: Dispatch the owning executor(s) named in the plan's "Affected
   files" section. On receipt of each executor's Phase 1 decision manifest, verify every entry
   against the plan before authorizing Phase 2. Any manifest entry with no valid plan citation
@@ -31,10 +31,10 @@ SPEC → PLAN → PLAN_APPROVED → IMPLEMENT → VERIFY → ACCEPT
   `review-security` against the implementation. They run in parallel and report independently.
 - **VERIFY → ACCEPT**: When all critic findings are resolved.
 - **On VERIFY failure**: Classify the finding (see routing table) — plan-defect routes to
-  `solution-architect`; implementation-defect routes to the owning executor. Resume VERIFY after
+  `slice-planner`; implementation-defect routes to the owning executor. Resume VERIFY after
   the fix is confirmed.
 - **On plan gap during IMPLEMENT**: Executor hard-stops and hands back a named plan gap. Return
-  to PLAN; `solution-architect` amends the plan. Re-run the plan-approval gate before resuming
+  to PLAN; `slice-planner` amends the plan. Re-run the plan-approval gate before resuming
   IMPLEMENT.
 
 Because planning is exhausted before code starts and executors cannot design, the VERIFY loop
@@ -57,7 +57,7 @@ A plan is approvable only if it contains ALL of the following, in order:
     no decision left to an executor.
 
 A plan missing any item is NOT approvable. The phrase "the builder can decide" anywhere in the
-plan is an automatic gate failure — return to `solution-architect`.
+plan is an automatic gate failure — return to `slice-planner`.
 
 ## Routing table
 
@@ -71,8 +71,8 @@ plan is an automatic gate failure — return to `solution-architect`.
 | Qdrant search params (top_k/threshold/with_payload), context assembly, SSE format, sources reference Qdrant IDs instead of chunks.id | retrieval-rag           | implementation-defect |
 | route path/method wrong, response envelope shape, multipart request buffered in memory                                               | api-transport           | implementation-defect |
 | OAuth flow, token encryption, OAuth scope width, sync deduplication                                                                  | oauth-sync              | implementation-defect |
-| undefined interface, missing signature, unspecified edge case — plan is silent on the behavior                                       | solution-architect      | plan-defect           |
-| fixing the finding requires changing an interface, data model, or PLAN.md-sourced invariant                                          | solution-architect      | plan-defect           |
+| undefined interface, missing signature, unspecified edge case — plan is silent on the behavior                                       | slice-planner           | plan-defect           |
+| fixing the finding requires changing an interface, data model, or PLAN.md-sourced invariant                                          | slice-planner           | plan-defect           |
 
 When a finding spans two executors' areas and the correct owner is genuinely ambiguous, escalate
 to the user before routing.
@@ -80,7 +80,7 @@ to the user before routing.
 ## Dispatch rules
 
 - Never dispatch an executor without an approved plan.
-- Never dispatch `solution-architect` to fix an implementation-defect.
+- Never dispatch `slice-planner` to fix an implementation-defect.
 - Never dispatch an executor to resolve a plan-defect.
 - Always dispatch `test-verification` and `review-security` independently after every IMPLEMENT
   phase — they run in parallel and report separately.
