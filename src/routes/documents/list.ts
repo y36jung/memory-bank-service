@@ -30,10 +30,10 @@ export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const { search, status, page, limit } = request.query;
 
-      const conditions: SQL[] = [];
+      const conditions: SQL[] = [eq(documents.userId, request.user.id)];
       if (search) conditions.push(ilike(documents.originalName, `%${search}%`));
       if (status && status.length > 0) conditions.push(inArray(documents.status, status));
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const whereClause = and(...conditions);
 
       const [items, countRows] = await Promise.all([
         db
@@ -67,7 +67,7 @@ export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
       const [doc] = await db
         .select()
         .from(documents)
-        .where(eq(documents.id, request.params.id))
+        .where(and(eq(documents.id, request.params.id), eq(documents.userId, request.user.id)))
         .limit(1);
       if (!doc) throw new AppError('NOT_FOUND', 'Document not found', 404);
 
@@ -91,7 +91,7 @@ export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
       const [doc] = await db
         .select()
         .from(documents)
-        .where(eq(documents.id, request.params.id))
+        .where(and(eq(documents.id, request.params.id), eq(documents.userId, request.user.id)))
         .limit(1);
       if (!doc) throw new AppError('NOT_FOUND', 'Document not found', 404);
 
@@ -131,7 +131,7 @@ export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
       const [doc] = await db
         .select()
         .from(documents)
-        .where(eq(documents.id, request.params.id))
+        .where(and(eq(documents.id, request.params.id), eq(documents.userId, request.user.id)))
         .limit(1);
       if (!doc) throw new AppError('NOT_FOUND', 'Document not found', 404);
       if (doc.status !== 'failed') {

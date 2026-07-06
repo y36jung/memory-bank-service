@@ -1,6 +1,6 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { documents } from '../../db/schema.js';
 import { getStreamWithLength } from '../../services/storage.js';
@@ -16,7 +16,7 @@ export const documentFileRoutes: FastifyPluginAsyncZod = async (app) => {
       const [doc] = await db
         .select()
         .from(documents)
-        .where(eq(documents.id, request.params.id))
+        .where(and(eq(documents.id, request.params.id), eq(documents.userId, request.user.id)))
         .limit(1);
 
       if (!doc) throw new AppError('NOT_FOUND', 'Document not found', 404);

@@ -28,8 +28,17 @@ export const roleEnum = pgEnum('role', ['user', 'assistant']);
 
 // ─── Tables ────────────────────────────────────────────────────────────────────
 
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull().unique(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 export const documents = pgTable('documents', {
   id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   filename: text('filename').notNull(),
   originalName: text('original_name').notNull(),
   sourceType: sourceTypeEnum('source_type').notNull(),
@@ -74,6 +83,9 @@ export const ingestionJobs = pgTable('ingestion_jobs', {
 
 export const chatSessions = pgTable('chat_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   title: text('title').notNull().default('New Chat'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -100,3 +112,5 @@ export type IngestionJob = typeof ingestionJobs.$inferSelect;
 export type NewIngestionJob = typeof ingestionJobs.$inferInsert;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type Message = typeof messages.$inferSelect;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
