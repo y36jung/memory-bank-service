@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { fastifyErrorHandler } from './lib/errors.js';
 import { env } from './config/env.js';
+import { authPlugin } from './plugins/auth.js';
 import { documentUploadRoutes } from './routes/documents/upload.js';
 import { documentListRoutes } from './routes/documents/list.js';
 import { chatSessionRoutes } from './routes/chat/sessions.js';
@@ -21,6 +22,7 @@ export async function buildApp() {
   });
 
   // Route registration
+  await app.register(authPlugin);
   await app.register(documentUploadRoutes, { prefix: '/api' });
   await app.register(documentListRoutes, { prefix: '/api' });
   await app.register(documentFileRoutes, { prefix: '/api' });

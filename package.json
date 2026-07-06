@@ -9,6 +9,7 @@
     "lint": "eslint src --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "format": "prettier --write .",
     "prepare": "husky",
     "db:migrate": "drizzle-kit migrate"

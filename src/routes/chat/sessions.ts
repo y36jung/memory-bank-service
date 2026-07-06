@@ -1,6 +1,6 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
-import { eq, desc, ilike } from 'drizzle-orm';
+import { and, eq, desc, ilike } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { chatSessions, messages } from '../../db/schema.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
@@ -15,7 +15,7 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const [session] = await db
         .insert(chatSessions)
-        .values({ title: request.body.title ?? 'New Chat' })
+        .values({ userId: request.user.id, title: request.body.title ?? 'New Chat' })
         .returning();
       sendSuccess(reply, session, 201);
     },
@@ -33,7 +33,9 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const { search } = request.query;
-      const whereClause = search ? ilike(chatSessions.title, `%${search}%`) : undefined;
+      const whereClause = search
+        ? and(eq(chatSessions.userId, request.user.id), ilike(chatSessions.title, `%${search}%`))
+        : eq(chatSessions.userId, request.user.id);
       const sessions = await db
         .select()
         .from(chatSessions)
@@ -53,7 +55,9 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const [session] = await db
         .select()
         .from(chatSessions)
-        .where(eq(chatSessions.id, request.params.id))
+        .where(
+          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
+        )
         .limit(1);
       if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
 
@@ -77,7 +81,9 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const [session] = await db
         .select()
         .from(chatSessions)
-        .where(eq(chatSessions.id, request.params.id))
+        .where(
+          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
+        )
         .limit(1);
       if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
 

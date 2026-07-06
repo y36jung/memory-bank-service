@@ -1,5 +1,9 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
+import { and, eq } from 'drizzle-orm';
+import { db } from '../../db/index.js';
+import { chatSessions } from '../../db/schema.js';
+import { AppError } from '../../lib/errors.js';
 import { streamChatResponse } from '../../services/chat.js';
 
 export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -12,6 +16,15 @@ export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
+      const [session] = await db
+        .select({ id: chatSessions.id })
+        .from(chatSessions)
+        .where(
+          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
+        )
+        .limit(1);
+      if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
+
       // @fastify/cors sets Access-Control-Allow-Origin in onSend, which fires after
       // the route handler — too late for SSE since we flush headers here directly.
       // Mirror the CORS header manually so the browser can read the stream.

@@ -22,6 +22,7 @@ export const documentUploadRoutes: FastifyPluginAsyncZod = async (app) => {
     await db.transaction(async (tx) => {
       await tx.insert(documents).values({
         id: documentId,
+        userId: request.user.id,
         filename: data.filename,
         originalName: data.filename,
         sourceType: 'upload',
