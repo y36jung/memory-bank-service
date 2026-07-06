@@ -42,7 +42,7 @@ in .claude/agents/. Slice plans live in .claude/plans/.
 - chunks.qdrantId = uuidv5(documentId + chunkIndex). Unique, deterministic.
 - Ingestion step 7 is one transaction: every chunk lands as `indexed` or none do.
 - Qdrant is fully rebuildable from Postgres; never duplicate chunk content into Qdrant-bound code.
-- OAuth tokens encrypted at rest (AES-256-GCM); request minimal scopes only.
+- OAuth is deferred (see PLAN.md § Future Additions); when reintroduced, tokens must be encrypted at rest (AES-256-GCM) with minimal scopes.
 
 ## Hard rules
 
