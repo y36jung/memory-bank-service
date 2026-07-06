@@ -38,7 +38,7 @@ export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
       reply.raw.setHeader('Connection', 'keep-alive');
       reply.raw.flushHeaders();
 
-      await streamChatResponse(request.params.id, request.body.message, reply);
+      await streamChatResponse(request.user.id, request.params.id, request.body.message, reply);
     },
   );
 };

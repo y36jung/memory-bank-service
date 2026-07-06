@@ -1,7 +1,7 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { db } from '../../db/index.js';
 import { documents, ingestionJobs } from '../../db/schema.js';
-import { uploadStream } from '../../services/storage.js';
+import { uploadStream, buildDocumentStorageKey } from '../../services/storage.js';
 import { ingestionQueue } from '../../queue/index.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +12,7 @@ export const documentUploadRoutes: FastifyPluginAsyncZod = async (app) => {
     if (!data) throw new AppError('NO_FILE', 'No file uploaded', 400);
 
     const documentId = randomUUID();
-    const storageKey = `documents/${documentId}/${data.filename}`;
+    const storageKey = buildDocumentStorageKey(request.user.id, documentId, data.filename);
 
     // Stream directly to S3 — never buffer the full file in memory
     await uploadStream(storageKey, data.file, data.mimetype);

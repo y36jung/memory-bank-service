@@ -86,6 +86,10 @@ import { retrieveChunks, retrieve } from '../../../src/services/retrieval.js';
 
 const MOCK_VECTOR = new Array(3072).fill(0.1) as number[];
 
+// Fixed userId used across every call site in this file — retrieval.ts's four
+// public functions all require userId as the leading argument (Slice 2).
+const TEST_USER_ID = 'test-user-11111111-1111-1111-1111-111111111111';
+
 const HYDE_RESPONSE =
   'Sedentary adults require approximately 0.8g protein per kg body weight daily.';
 
@@ -167,14 +171,14 @@ describe('retrieveChunks', () => {
   it('returns empty array when Qdrant returns no results', async () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
-    const result = await retrieveChunks('what is the meaning of life?');
+    const result = await retrieveChunks(TEST_USER_ID, 'what is the meaning of life?');
     expect(result).toEqual([]);
   });
 
   it('returns empty array when batchEmbed returns empty array (no vector)', async () => {
     vi.mocked(embeddings.batchEmbed).mockResolvedValue([]);
 
-    const result = await retrieveChunks('test query');
+    const result = await retrieveChunks(TEST_USER_ID, 'test query');
     expect(result).toEqual([]);
     // searchPoints should never be called if there's no vector
     expect(qdrant.searchPoints).not.toHaveBeenCalled();
@@ -219,7 +223,7 @@ describe('retrieveChunks', () => {
       makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
     );
 
-    const result = await retrieveChunks('test query');
+    const result = await retrieveChunks(TEST_USER_ID, 'test query');
 
     expect(result).toHaveLength(2);
     // Sorted by score descending — highest score first
@@ -256,7 +260,7 @@ describe('retrieveChunks', () => {
       makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
     );
 
-    const result = await retrieveChunks('test query');
+    const result = await retrieveChunks(TEST_USER_ID, 'test query');
     expect(result).toHaveLength(1);
     expect(result[0]?.qdrantId).toBe('qdrant-uuid-1');
   });
@@ -314,7 +318,7 @@ describe('retrieveChunks', () => {
       makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
     );
 
-    const result = await retrieveChunks('test query');
+    const result = await retrieveChunks(TEST_USER_ID, 'test query');
     expect(result).toHaveLength(3);
     expect(result[0]?.score).toBeGreaterThan(result[1]?.score ?? 0);
     expect(result[1]?.score).toBeGreaterThan(result[2]?.score ?? 0);
@@ -345,7 +349,7 @@ describe('retrieveChunks', () => {
       makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
     );
 
-    const result = await retrieveChunks('test query');
+    const result = await retrieveChunks(TEST_USER_ID, 'test query');
     expect(result).toHaveLength(1);
     expect(result[0]?.content).toBe(postgresContent);
   });
@@ -373,24 +377,24 @@ describe('retrieveChunks', () => {
       makeSelectChain(dbRows) as unknown as ReturnType<typeof db.select>,
     );
 
-    const result = await retrieveChunks('test query');
+    const result = await retrieveChunks(TEST_USER_ID, 'test query');
     expect(result[0]?.documentName).toBe('my-important-document.pdf');
   });
 
   it('passes topK and scoreThreshold to searchPoints', async () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
-    await retrieveChunks('query', 5, 0.7);
+    await retrieveChunks(TEST_USER_ID, 'query', 5, 0.7);
 
-    expect(qdrant.searchPoints).toHaveBeenCalledWith(MOCK_VECTOR, 5, 0.7);
+    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 5, 0.7);
   });
 
   it('uses defaults topK=10 and scoreThreshold=0.4 when not provided', async () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
-    await retrieveChunks('query');
+    await retrieveChunks(TEST_USER_ID, 'query');
 
-    expect(qdrant.searchPoints).toHaveBeenCalledWith(MOCK_VECTOR, 10, 0.4);
+    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 10, 0.4);
   });
 });
 
@@ -403,7 +407,7 @@ describe('HyDE — generateHypotheticalAnswer integration', () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     const originalQuery = 'How much protein should a sedentary adult consume per day?';
-    await retrieveChunks(originalQuery);
+    await retrieveChunks(TEST_USER_ID, originalQuery);
 
     // batchEmbed must have been called with the HyDE text, not the original query
     expect(embeddings.batchEmbed).toHaveBeenCalledWith([HYDE_RESPONSE]);
@@ -415,7 +419,7 @@ describe('HyDE — generateHypotheticalAnswer integration', () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     const originalQuery = 'What is photosynthesis?';
-    await retrieveChunks(originalQuery);
+    await retrieveChunks(TEST_USER_ID, originalQuery);
 
     // On error, generateHypotheticalAnswer returns the original query as fallback
     expect(embeddings.batchEmbed).toHaveBeenCalledWith([originalQuery]);
@@ -427,7 +431,7 @@ describe('HyDE — generateHypotheticalAnswer integration', () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     const originalQuery = 'How much protein should a sedentary adult consume per day?';
-    await retrieveChunks(originalQuery);
+    await retrieveChunks(TEST_USER_ID, originalQuery);
 
     // classifyQuery must be called with the original query + a date string
     expect(queryClassifierModule.classifyQuery).toHaveBeenCalledWith(
@@ -500,7 +504,7 @@ describe('score fusion — hybrid metadata + vector search', () => {
       return vectorChain as unknown as ReturnType<typeof db.select>;
     });
 
-    const result = await retrieveChunks('foo document query');
+    const result = await retrieveChunks(TEST_USER_ID, 'foo document query');
 
     expect(result).toHaveLength(1);
     const fusedScore = 0.5 * CONTENT_SCORE + 0.5 * METADATA_SCORE;
@@ -539,7 +543,7 @@ describe('score fusion — hybrid metadata + vector search', () => {
     const metadataChain = makeMetadataSelectChain([metadataRow]);
     vi.mocked(db.select).mockReturnValue(metadataChain as unknown as ReturnType<typeof db.select>);
 
-    const result = await retrieveChunks('foo document');
+    const result = await retrieveChunks(TEST_USER_ID, 'foo document');
 
     expect(result).toHaveLength(1);
     // contentScore = 0 (not in vector results), metadataScore = 1.0
@@ -572,7 +576,7 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
     const docChain = makeDocumentListSelectChain([mockDocRow]);
     vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
 
-    const result = await retrieve('what documents have I uploaded?');
+    const result = await retrieve(TEST_USER_ID, 'what documents have I uploaded?');
 
     expect(result.type).toBe('document_list');
     if (result.type === 'document_list') {
@@ -591,7 +595,7 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
     const docChain = makeDocumentListSelectChain([mockDocRow]);
     vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
 
-    await retrieve('list all my documents');
+    await retrieve(TEST_USER_ID, 'list all my documents');
 
     expect(qdrant.searchPoints).not.toHaveBeenCalled();
   });
@@ -605,7 +609,7 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
     const docChain = makeDocumentListSelectChain([]);
     vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
 
-    await retrieve('show me my files');
+    await retrieve(TEST_USER_ID, 'show me my files');
 
     expect(embeddings.batchEmbed).not.toHaveBeenCalled();
   });
@@ -621,7 +625,7 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
       .mocked(db.select)
       .mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
 
-    const result = await retrieve('what did I upload last week?');
+    const result = await retrieve(TEST_USER_ID, 'what did I upload last week?');
 
     // The query should have used db.select (SQL path)
     expect(selectSpy).toHaveBeenCalled();
@@ -638,7 +642,7 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
     const docChain = makeDocumentListSelectChain(allDocs);
     vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
 
-    const result = await retrieve('what documents have I uploaded?');
+    const result = await retrieve(TEST_USER_ID, 'what documents have I uploaded?');
 
     expect(result.type).toBe('document_list');
     if (result.type === 'document_list') {

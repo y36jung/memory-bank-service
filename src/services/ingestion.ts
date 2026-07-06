@@ -207,7 +207,7 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
     const qdrantId = generateQdrantId(documentId, c.chunkIndex);
     const vector = vectors[i];
     if (!vector) throw new Error(`Missing embedding for chunk index ${i}`);
-    return { id: qdrantId, vector };
+    return { id: qdrantId, vector, userId: doc.userId };
   });
   await withTimeout(upsertPoints(points), 15_000, 'qdrant upsert');
 }

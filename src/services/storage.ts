@@ -147,3 +147,23 @@ export async function getObjectBuffer(key: string): Promise<Buffer | null> {
     throw err;
   }
 }
+
+/**
+ * Build the S3 object key for an uploaded document, namespaced by owning user.
+ *
+ * Pure — no I/O. The returned key is persisted verbatim into documents.storage_key
+ * and later dereferenced as-is by every read/delete path (file.ts, list.ts), so the
+ * format is free to differ from any legacy key already stored.
+ *
+ * @param userId     owning users.id (request.user.id)
+ * @param documentId the freshly-minted document UUID
+ * @param filename   the uploaded file's name (passed through verbatim, no sanitization)
+ * @returns `users/<userId>/documents/<documentId>/<filename>`
+ */
+export function buildDocumentStorageKey(
+  userId: string,
+  documentId: string,
+  filename: string,
+): string {
+  return `users/${userId}/documents/${documentId}/${filename}`;
+}

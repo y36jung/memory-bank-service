@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import type { FastifyReply } from 'fastify';
 import { db } from '../db/index.js';
 import { messages, chatSessions } from '../db/schema.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { retrieve, type RetrievedChunk, type RetrievedDocument } from './retrieval.js';
 import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
@@ -127,6 +127,7 @@ function buildDocumentListContext(docs: RetrievedDocument[]): string {
  * function returns — the SSE stream is terminated inside this function.
  */
 export async function streamChatResponse(
+  userId: string,
   sessionId: string,
   userMessage: string,
   reply: FastifyReply,
@@ -135,14 +136,14 @@ export async function streamChatResponse(
   const sessionRows = await db
     .select({ id: chatSessions.id })
     .from(chatSessions)
-    .where(eq(chatSessions.id, sessionId));
+    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
 
   if (sessionRows.length === 0) {
     throw new AppError('SESSION_NOT_FOUND', 'Session not found', 404);
   }
 
   // ── Step 2: Retrieve grounding context ───────────────────────────────────
-  const retrievalResult = await retrieve(userMessage);
+  const retrievalResult = await retrieve(userId, userMessage);
 
   // ── Step 3: Insert user message ──────────────────────────────────────────
   await db.insert(messages).values({

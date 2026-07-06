@@ -13,12 +13,12 @@
 import 'dotenv/config';
 
 import { db, pool } from '../src/db/index.js';
-import { chunks } from '../src/db/schema.js';
+import { chunks, documents } from '../src/db/schema.js';
 import { generateQdrantId } from '../src/lib/idgen.js';
 import { batchEmbed } from '../src/services/embeddings.js';
 import { ensureCollection, upsertPoints } from '../src/services/qdrant.js';
 import type { QdrantPoint } from '../src/services/qdrant.js';
-import { asc, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 const BATCH_SIZE = 500;
 
@@ -51,8 +51,10 @@ async function main(): Promise<void> {
         documentId: chunks.documentId,
         chunkIndex: chunks.chunkIndex,
         content: chunks.content,
+        userId: documents.userId,
       })
       .from(chunks)
+      .innerJoin(documents, eq(chunks.documentId, documents.id))
       .orderBy(asc(chunks.documentId), asc(chunks.chunkIndex))
       .limit(BATCH_SIZE)
       .offset(offset);
@@ -74,7 +76,7 @@ async function main(): Promise<void> {
         );
       }
       const qdrantId = generateQdrantId(c.documentId, c.chunkIndex);
-      return { id: qdrantId, vector };
+      return { id: qdrantId, vector, userId: c.userId };
     });
 
     // Step 4c: Upsert into Qdrant.
