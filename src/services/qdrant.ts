@@ -19,6 +19,7 @@ const UPSERT_BATCH_SIZE = 100;
 export interface QdrantPoint {
   id: string; // qdrantId — the point's identity in Qdrant
   vector: number[]; // 3072-float embedding
+  userId: string; // owning users.id — Qdrant payload isolation key (PLAN.md L495)
 }
 
 export interface SearchResult {
@@ -57,6 +58,21 @@ export async function ensureCollection(): Promise<void> {
     // Suppress the original "not found" error — collection is now guaranteed to exist.
     void err;
   }
+
+  // Ensure the userId payload index exists — runs unconditionally so pre-existing
+  // collections (created before this index was introduced) also get indexed.
+  try {
+    await client.createPayloadIndex(COLLECTION, {
+      field_name: 'userId',
+      field_schema: 'keyword',
+      wait: true,
+    });
+  } catch (indexErr) {
+    // Swallow "already exists" (409) — idempotent, matching the createCollection pattern above.
+    if ((indexErr as { status?: number })?.status !== 409) {
+      throw indexErr;
+    }
+  }
 }
 
 /**
@@ -72,7 +88,7 @@ export async function upsertPoints(points: QdrantPoint[]): Promise<void> {
 
     await client.upsert(COLLECTION, {
       wait: true,
-      points: batch.map((p) => ({ id: p.id, vector: p.vector })),
+      points: batch.map((p) => ({ id: p.id, vector: p.vector, payload: { userId: p.userId } })),
     });
   }
 }
@@ -84,6 +100,7 @@ export async function upsertPoints(points: QdrantPoint[]): Promise<void> {
  * Payload and vector are not returned (`with_payload: false`).
  */
 export async function searchPoints(
+  userId: string,
   vector: number[],
   topK: number,
   scoreThreshold: number,
@@ -92,7 +109,8 @@ export async function searchPoints(
     vector,
     limit: topK,
     score_threshold: scoreThreshold,
-    with_payload: false,
+    filter: { must: [{ key: 'userId', match: { value: userId } }] },
+    with_payload: false, // unchanged — filtering is orthogonal to payload return (PLAN.md L289)
     with_vector: false,
   });
 

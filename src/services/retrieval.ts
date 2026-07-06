@@ -78,7 +78,11 @@ async function generateHypotheticalAnswer(query: string): Promise<string> {
  * Keyword matching is performed against documents.original_name via ILIKE.
  * A keyword relevance score is computed as the fraction of keywords matched.
  */
-async function retrieveByMetadata(filters: MetadataFilters, limit = 10): Promise<RetrievedChunk[]> {
+async function retrieveByMetadata(
+  userId: string,
+  filters: MetadataFilters,
+  limit = 10,
+): Promise<RetrievedChunk[]> {
   const keywords = (filters.documentKeywords ?? []).filter((kw) => kw.trim().length > 0);
   const kwCount = keywords.length;
 
@@ -100,6 +104,7 @@ async function retrieveByMetadata(filters: MetadataFilters, limit = 10): Promise
 
   // Build AND conditions for non-keyword filters.
   const andConditions = [];
+  andConditions.push(eq(documents.userId, userId));
   if (keywordCandidacyExpr) andConditions.push(sql`(${keywordCandidacyExpr})`);
   if (filters.uploadedAfter)
     andConditions.push(gte(documents.createdAt, new Date(filters.uploadedAfter)));
@@ -162,10 +167,12 @@ async function retrieveByMetadata(filters: MetadataFilters, limit = 10): Promise
  * Used for list_documents intent queries.
  */
 async function retrieveDocuments(
+  userId: string,
   filters: MetadataFilters | null,
   limit = 20,
 ): Promise<RetrievedDocument[]> {
   const andConditions = [];
+  andConditions.push(eq(documents.userId, userId));
 
   if (filters) {
     if (filters.uploadedAfter)
@@ -217,6 +224,7 @@ async function retrieveDocuments(
  * @param scoreThreshold Minimum cosine-similarity score to include (default: 0.4).
  */
 export async function retrieve(
+  userId: string,
   query: string,
   topK = 10,
   scoreThreshold = 0.4,
@@ -231,7 +239,7 @@ export async function retrieve(
 
   // list_documents path: skip vector search, query documents table directly.
   if (classification?.intent === 'list_documents') {
-    const docs = await retrieveDocuments(classification.filters, topK);
+    const docs = await retrieveDocuments(userId, classification.filters, topK);
     return { type: 'document_list', documents: docs };
   }
 
@@ -242,7 +250,7 @@ export async function retrieve(
       const [vector] = await batchEmbed([hydeText]);
       if (vector === undefined) return null;
 
-      const qdrantResults = await searchPoints(vector, topK, scoreThreshold);
+      const qdrantResults = await searchPoints(userId, vector, topK, scoreThreshold);
       if (qdrantResults.length === 0) return [];
 
       const qdrantIds = qdrantResults.map((r) => r.id);
@@ -265,7 +273,7 @@ export async function retrieve(
         })
         .from(chunks)
         .innerJoin(documents, eq(chunks.documentId, documents.id))
-        .where(inArray(chunks.qdrantId, qdrantIds));
+        .where(and(inArray(chunks.qdrantId, qdrantIds), eq(documents.userId, userId)));
 
       return rows
         .map((row): RetrievedChunk | null => {
@@ -291,7 +299,7 @@ export async function retrieve(
     })(),
     // Metadata SQL path: resolves to [] immediately if no classification/filters.
     classification?.filters
-      ? retrieveByMetadata(classification.filters, topK)
+      ? retrieveByMetadata(userId, classification.filters, topK)
       : Promise.resolve([] as RetrievedChunk[]),
   ]);
 
@@ -336,10 +344,11 @@ export async function retrieve(
  * Existing callers (tests, chat.ts pre-migration) can use this without changes.
  */
 export async function retrieveChunks(
+  userId: string,
   query: string,
   topK = 10,
   scoreThreshold = 0.4,
 ): Promise<RetrievedChunk[]> {
-  const result = await retrieve(query, topK, scoreThreshold);
+  const result = await retrieve(userId, query, topK, scoreThreshold);
   return result.type === 'chunk_results' ? result.chunks : [];
 }
