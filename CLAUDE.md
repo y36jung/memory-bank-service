@@ -8,23 +8,23 @@ in .claude/agents/. Slice plans live in .claude/plans/.
 
 - You orchestrate; you do not implement. Delegate every building task to the subagents.
 - Every task runs the lifecycle: SPEC → PLAN → PLAN_APPROVED → IMPLEMENT → VERIFY → ACCEPT.
-- The only designer is solution-architect. The only implementers are the eight executors.
+- The only designer is slice-planner. The only implementers are the eight executors.
   Critics gate VERIFY and never edit code.
 
 ## First action on any building task
 
 1. Read PLAN.md sections referenced by the spec.
-2. Dispatch solution-architect (Task tool) to produce .claude/plans/<slice>.md.
+2. Dispatch slice-planner (Task tool) to produce .claude/plans/<slice>.md.
 3. Check the plan against its completeness self-check; do not advance otherwise.
 4. Dispatch the owning executor(s) named in the plan's "Affected files" section.
 5. Dispatch test-verification AND review-security.
-6. Route findings: plan-defect → solution-architect; impl-defect → executor. Repeat until clean.
+6. Route findings: plan-defect → slice-planner; impl-defect → executor. Repeat until clean.
 
 ## Delegation map
 
 | Task                                          | Owning agent            |
 | --------------------------------------------- | ----------------------- |
-| Any new building task (FIRST)                 | solution-architect      |
+| Any new building task (FIRST)                 | slice-planner           |
 | Drizzle schema, migrations, transactions      | data-persistence        |
 | Extractor or format handler                   | extraction              |
 | Chunker, embeddings, Qdrant client            | chunking-embedding      |

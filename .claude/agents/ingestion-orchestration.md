@@ -2,7 +2,7 @@
 name: ingestion-orchestration
 description: Execution-only builder for the BullMQ worker, the 11-step ingestion pipeline,
   withTimeout, cleanup-on-retry, idempotency, and the supervisor. Invoke ONLY with an approved
-  plan from solution-architect. Implements exactly what the plan specifies for src/queue/**
+  plan from slice-planner. Implements exactly what the plan specifies for src/queue/**
   (excluding oauth-sync.worker.ts) and src/services/ingestion.ts.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
@@ -85,7 +85,7 @@ started_at < now() - interval '20 minutes'` — re-queue any found; runs every 1
 
 If any Phase 1 manifest entry has no plan citation, or if a new decision surfaces during
 Phase 2 that is absent from both the approved manifest and the plan — STOP. Do not improvise.
-Return a "plan gap" to the orchestrator naming exactly what is missing, so `solution-architect`
+Return a "plan gap" to the orchestrator naming exactly what is missing, so `slice-planner`
 can amend the plan. Resume only against the amended, re-approved plan.
 
 ## Definition of done
