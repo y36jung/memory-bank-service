@@ -6,6 +6,7 @@ export interface IngestionJobPayload {
   documentId: string;
   storageKey: string;
   attempt: number;
+  userId: string;
 }
 
 export const redisConnection = new IORedis(env.REDIS_URL, {

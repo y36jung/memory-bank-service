@@ -1,4 +1,4 @@
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 
 export class AppError extends Error {
   constructor(
@@ -29,7 +29,11 @@ export function sendError(reply: FastifyReply, err: unknown): void {
 }
 
 // Fastify error handler — register with app.setErrorHandler(fastifyErrorHandler)
-export function fastifyErrorHandler(error: Error, _request: unknown, reply: FastifyReply): void {
+export function fastifyErrorHandler(
+  error: Error,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): void {
   if (error instanceof AppError) {
     reply
       .status(error.statusCode)
@@ -37,7 +41,7 @@ export function fastifyErrorHandler(error: Error, _request: unknown, reply: Fast
     return;
   }
   // Log the real error server-side; never expose raw library messages to clients.
-  console.error(error);
+  request.log.error({ err: error }, 'Unhandled error');
   reply
     .status(500)
     .send({ data: null, error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });

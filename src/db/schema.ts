@@ -8,6 +8,9 @@ import {
   real,
   timestamp,
   jsonb,
+  boolean,
+  index,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 // ─── Enum types ────────────────────────────────────────────────────────────────
@@ -31,26 +34,31 @@ export const roleEnum = pgEnum('role', ['user', 'assistant']);
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
+  passwordHash: text('password_hash'), // null ⇒ user cannot log in (synthetic/legacy)
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const documents = pgTable('documents', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  filename: text('filename').notNull(),
-  originalName: text('original_name').notNull(),
-  sourceType: sourceTypeEnum('source_type').notNull(),
-  mimeType: text('mime_type').notNull(),
-  storageKey: text('storage_key'),
-  status: statusEnum('status').notNull().default('pending'),
-  errorMessage: text('error_message'),
-  metadata: jsonb('metadata').default({}),
-  sizeBytes: bigint('size_bytes', { mode: 'number' }),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+export const documents = pgTable(
+  'documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    filename: text('filename').notNull(),
+    originalName: text('original_name').notNull(),
+    sourceType: sourceTypeEnum('source_type').notNull(),
+    mimeType: text('mime_type').notNull(),
+    storageKey: text('storage_key'),
+    status: statusEnum('status').notNull().default('pending'),
+    errorMessage: text('error_message'),
+    metadata: jsonb('metadata').default({}),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [index('documents_user_id_idx').on(table.userId)],
+);
 
 export const chunks = pgTable('chunks', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -81,15 +89,19 @@ export const ingestionJobs = pgTable('ingestion_jobs', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const chatSessions = pgTable('chat_sessions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  title: text('title').notNull().default('New Chat'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+export const chatSessions = pgTable(
+  'chat_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull().default('New Chat'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [index('chat_sessions_user_id_idx').on(table.userId)],
+);
 
 export const messages = pgTable('messages', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -101,6 +113,24 @@ export const messages = pgTable('messages', {
   sources: jsonb('sources').default([]),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+export const refreshTokens = pgTable(
+  'refresh_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(), // sha256(hex) of the raw token; UNIQUE ⇒ index + single-row lookup
+    parentTokenId: uuid('parent_token_id').references((): AnyPgColumn => refreshTokens.id, {
+      onDelete: 'set null',
+    }), // self-ref; annotation avoids TS circular-inference error
+    isUsed: boolean('is_used').notNull().default(false),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('refresh_tokens_user_id_idx').on(table.userId)],
+);
 
 // ─── Inferred types ────────────────────────────────────────────────────────────
 
@@ -114,3 +144,5 @@ export type ChatSession = typeof chatSessions.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type RefreshToken = typeof refreshTokens.$inferSelect;
+export type NewRefreshToken = typeof refreshTokens.$inferInsert;

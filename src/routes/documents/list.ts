@@ -150,7 +150,12 @@ export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
       });
       await ingestionQueue.add(
         'ingest',
-        { documentId: request.params.id, storageKey: doc.storageKey, attempt: 1 },
+        {
+          documentId: request.params.id,
+          storageKey: doc.storageKey,
+          attempt: 1,
+          userId: doc.userId,
+        },
         { jobId: bullJobId },
       );
 

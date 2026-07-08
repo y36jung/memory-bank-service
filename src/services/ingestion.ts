@@ -104,6 +104,16 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
     throw new UnrecoverableError(`document missing for id=${documentId}`);
   }
 
+  // Cheap integrity check: payload userId must match the document's owner.
+  // Guarded by `job.data.userId &&` so legacy in-flight jobs (enqueued before
+  // this deploy, without userId) are not dead-lettered — Postgres stays source
+  // of truth in that case.
+  if (job.data.userId && doc.userId !== job.data.userId) {
+    throw new UnrecoverableError(
+      `payload userId ${job.data.userId} != document userId ${doc.userId} for doc ${documentId}`,
+    );
+  }
+
   // Step 2 CLEANUP: idempotent; no-op on first attempt.
   // Fetch qdrantIds while they still exist in Postgres, then commit all Postgres
   // writes atomically before touching Qdrant. Orphan Qdrant vectors (if deletePoints
@@ -245,7 +255,7 @@ export function startSupervisor(): NodeJS.Timeout {
 
       for (const row of stuck) {
         const [docRow] = await db
-          .select({ storageKey: documents.storageKey })
+          .select({ storageKey: documents.storageKey, userId: documents.userId })
           .from(documents)
           .where(eq(documents.id, row.documentId))
           .limit(1);
@@ -257,6 +267,7 @@ export function startSupervisor(): NodeJS.Timeout {
             documentId: row.documentId,
             storageKey: docRow.storageKey,
             attempt: row.attempt + 1,
+            userId: docRow.userId,
           },
           { jobId: row.bullJobId },
         );

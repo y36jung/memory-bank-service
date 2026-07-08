@@ -42,7 +42,7 @@ export const documentUploadRoutes: FastifyPluginAsyncZod = async (app) => {
     // BullMQ enqueue outside transaction; ingestion_jobs row is the durable receipt
     await ingestionQueue.add(
       'ingest',
-      { documentId, storageKey, attempt: 1 },
+      { documentId, storageKey, attempt: 1, userId: request.user.id },
       { jobId: bullJobId },
     );
 
