@@ -54,6 +54,7 @@ export async function buildTestApp() {
   app.setErrorHandler(fastifyErrorHandler);
   await app.register(cors, {
     origin: env.NODE_ENV === 'development' ? ['http://localhost:3001'] : [],
+    credentials: true,
   });
 
   // Root plugins — both the public and protected zones need cookie read/write
