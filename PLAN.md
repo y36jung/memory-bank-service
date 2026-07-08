@@ -321,6 +321,44 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
 
 All routes are prefixed `/api/v1`. Responses follow `{ data, error }` envelope.
 
+### Auth
+
+| Method | Path             | Description                                                                                       |
+| ------ | ---------------- | ------------------------------------------------------------------------------------------------- |
+| `POST` | `/auth/register` | Create an account; returns `{ user, accessToken }` (201) + sets refresh cookie                    |
+| `POST` | `/auth/login`    | Authenticate with email + password; returns `{ user, accessToken }` (200) + refresh cookie        |
+| `POST` | `/auth/refresh`  | Rotate the refresh token (read from cookie); returns `{ accessToken }` (200) + new refresh cookie |
+| `POST` | `/auth/logout`   | Revoke the current refresh-token family; clears the refresh cookie (200, idempotent)              |
+
+**Auth flow detail:**
+
+```
+POST /auth/register   body: { email, password (min 8) }
+  → 201 { data: { user: { id, email }, accessToken } } + Set-Cookie: refresh_token (httpOnly)
+  → 409 EMAIL_TAKEN if the email is already registered
+
+POST /auth/login      body: { email, password }
+  → 200 { data: { user: { id, email }, accessToken } } + Set-Cookie: refresh_token (httpOnly)
+  → 401 INVALID_CREDENTIALS on unknown email or wrong password
+  → rate limited: 10 requests/minute per IP
+
+POST /auth/refresh    (no body; reads the refresh_token cookie)
+  → 200 { data: { accessToken } } + rotated Set-Cookie: refresh_token
+  → 401 UNAUTHORIZED (uniform code) if the cookie is missing, expired, unknown, or reused
+     — reuse of an already-used refresh token revokes its entire token family
+
+POST /auth/logout     (no body; reads the refresh_token cookie)
+  → 200 { data: { success: true } } always (idempotent); revokes the token family
+     server-side and clears the cookie
+```
+
+Access tokens are JWTs (`{ sub: userId }`, HS256, 15-minute TTL, signed with the existing
+`JWT_SECRET`). Refresh tokens are opaque random values delivered only via an httpOnly
+cookie (30-day TTL); the server stores only their SHA-256 hash, never the raw value, and
+rotates them on every `/auth/refresh` call. Each rotation links parent → child, so replaying
+an already-used refresh token revokes the entire family (all descendants), forcing
+re-authentication of that compromised session.
+
 ### Documents
 
 | Method   | Path                   | Description                                                        |
@@ -491,8 +529,8 @@ Milestones 3 & 4 (Gmail/Drive and Outlook/OneDrive OAuth) were originally scoped
 
 These are recommended next steps once the core service is stable.
 
-**1. Multi-tenancy**
-Add a `users` table, attach all resources to a `user_id`, and enforce row-level security in Postgres. Add JWT/session auth (e.g., `@fastify/jwt` + `better-auth` or Clerk). Qdrant supports filtering by payload field, so per-user isolation is just a `must` filter on `userId` in every search.
+**1. Multi-tenancy — implemented (slices 1–3)**
+The single→multi-user conversion has landed across three slices: a `users` table with per-user `user_id` foreign keys and query-level scoping on every resource (documents, chat sessions, chat messages); a global JWT-verify `preHandler` hook gating all protected routes; a per-user `must` filter on `userId` in every Qdrant search; and S3 storage keys namespaced per user. Slice 3 added the identity surface itself: password-based registration/login, short-lived JWT access tokens, and rotating refresh-token families (with reuse detection) issued and verified via the `/auth/*` endpoints — see [API Design](#api-design). Row-level security enforced natively by Postgres (as opposed to the application-layer `user_id` scoping already in place) remains a possible future hardening step.
 
 **2. OAuth Integration (Gmail, Google Drive, Outlook, OneDrive)**
 Deferred to reduce initial scope — was originally Milestones 3 & 4. Revisit once the core single-source (upload) pipeline and multi-tenancy are stable, since OAuth tokens and synced documents need to be scoped per-user from the start.

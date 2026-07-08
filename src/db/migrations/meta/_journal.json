@@ -43,6 +43,13 @@
       "when": 1783312384766,
       "tag": "0005_add_users_table",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783383400978,
+      "tag": "0006_dapper_marauders",
+      "breakpoints": true
     }
   ]
 }
