@@ -5,6 +5,7 @@ import { db } from '../../db/index.js';
 import { chatSessions } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { streamChatResponse } from '../../services/chat.js';
+import { isAllowedOrigin } from '../../config/cors.js';
 
 export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
@@ -27,9 +28,10 @@ export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
 
       // @fastify/cors sets Access-Control-Allow-Origin in onSend, which fires after
       // the route handler — too late for SSE since we flush headers here directly.
-      // Mirror the CORS header manually so the browser can read the stream.
+      // Mirror the CORS header manually, but ONLY for origins in the shared
+      // allow-list (src/config/cors.ts) — never reflect an arbitrary Origin.
       const requestOrigin = request.headers.origin;
-      if (requestOrigin) {
+      if (isAllowedOrigin(requestOrigin)) {
         reply.raw.setHeader('Access-Control-Allow-Origin', requestOrigin);
         reply.raw.setHeader('Vary', 'Origin');
       }
