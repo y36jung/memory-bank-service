@@ -36,7 +36,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { fastifyErrorHandler } from '../../../src/lib/errors.js';
-import { env } from '../../../src/config/env.js';
+import { CORS_ALLOWED_ORIGINS } from '../../../src/config/cors.js';
 import { jwtPlugin } from '../../../src/plugins/jwt.js';
 import { authPlugin } from '../../../src/plugins/auth.js';
 import { documentUploadRoutes } from '../../../src/routes/documents/upload.js';
@@ -53,7 +53,7 @@ export async function buildTestApp() {
   await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
   app.setErrorHandler(fastifyErrorHandler);
   await app.register(cors, {
-    origin: env.NODE_ENV === 'development' ? ['http://localhost:3001'] : [],
+    origin: [...CORS_ALLOWED_ORIGINS],
     credentials: true,
   });
 

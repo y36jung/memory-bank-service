@@ -7,6 +7,7 @@ import rateLimit from '@fastify/rate-limit';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { fastifyErrorHandler } from './lib/errors.js';
 import { env } from './config/env.js';
+import { CORS_ALLOWED_ORIGINS } from './config/cors.js';
 import { jwtPlugin } from './plugins/jwt.js';
 import { authPlugin } from './plugins/auth.js';
 import { documentUploadRoutes } from './routes/documents/upload.js';
@@ -40,7 +41,7 @@ export async function buildApp() {
   await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50 MB
   app.setErrorHandler(fastifyErrorHandler);
   await app.register(cors, {
-    origin: env.NODE_ENV === 'development' ? ['http://localhost:3001'] : [],
+    origin: [...CORS_ALLOWED_ORIGINS],
     credentials: true,
   });
 
