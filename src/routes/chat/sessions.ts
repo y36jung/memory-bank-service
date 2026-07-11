@@ -71,6 +71,29 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
+  // PATCH /chat/sessions/:id — rename a session (update its title)
+  app.patch(
+    '/chat/sessions/:id',
+    {
+      schema: {
+        params: z.object({ id: z.string().uuid() }),
+        body: z.object({ title: z.string().min(1).max(200) }),
+      },
+    },
+    async (request, reply) => {
+      const [session] = await db
+        .update(chatSessions)
+        .set({ title: request.body.title, updatedAt: new Date() })
+        .where(
+          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
+        )
+        .returning();
+      if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
+
+      sendSuccess(reply, session);
+    },
+  );
+
   // DELETE /chat/sessions/:id — delete session (messages cascade)
   app.delete(
     '/chat/sessions/:id',
