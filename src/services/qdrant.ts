@@ -134,3 +134,17 @@ export async function deletePoints(qdrantIds: string[]): Promise<void> {
     points: qdrantIds,
   });
 }
+
+/**
+ * Delete every point owned by a single user via a server-side payload filter.
+ *
+ * Unlike deletePoints (delete-by-ID-list), this is one filter-based operation
+ * keyed on the `userId` payload field (indexed in ensureCollection). Used by
+ * account deletion to purge all of a user's vectors without enumerating IDs.
+ */
+export async function deletePointsByUserId(userId: string): Promise<void> {
+  await client.delete(COLLECTION, {
+    wait: true,
+    filter: { must: [{ key: 'userId', match: { value: userId } }] },
+  });
+}

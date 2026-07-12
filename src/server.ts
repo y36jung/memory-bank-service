@@ -15,6 +15,7 @@ import { documentListRoutes } from './routes/documents/list.js';
 import { chatSessionRoutes } from './routes/chat/sessions.js';
 import { chatMessageRoutes } from './routes/chat/messages.js';
 import { documentFileRoutes } from './routes/documents/file.js';
+import { accountRoutes } from './routes/account/delete.js';
 import { authRoutes, rateLimitEnvelope } from './routes/auth/index.js';
 
 export async function buildApp() {
@@ -67,6 +68,7 @@ export async function buildApp() {
     await protectedScope.register(documentFileRoutes, { prefix: '/api' });
     await protectedScope.register(chatSessionRoutes, { prefix: '/api' });
     await protectedScope.register(chatMessageRoutes, { prefix: '/api' });
+    await protectedScope.register(accountRoutes, { prefix: '/api' });
   });
 
   await app.register(authRoutes, { prefix: '/api/auth' }); // PUBLIC (no enforce hook)
