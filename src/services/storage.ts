@@ -4,6 +4,9 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+  type ListObjectsV2CommandOutput,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { Readable } from 'node:stream';
@@ -93,6 +96,54 @@ export async function deleteObject(key: string): Promise<void> {
       Key: key,
     }),
   );
+}
+
+/**
+ * Delete every S3 object under a key prefix. Paginates ListObjectsV2
+ * (ContinuationToken/IsTruncated) and batch-deletes each page via
+ * DeleteObjects. Both AWS operations cap at 1000 keys, so one list page maps
+ * to exactly one delete batch.
+ *
+ * Errors are PROPAGATED (not swallowed) — same contract as deleteObject; the
+ * caller decides fatal vs non-fatal. DeleteObjects can return HTTP 200 with a
+ * non-empty `Errors` array for per-key failures the SDK does NOT throw for, so
+ * this function throws a summarizing Error in that case for uniform handling.
+ */
+export async function deleteObjectsByPrefix(prefix: string): Promise<void> {
+  let continuationToken: string | undefined = undefined;
+  do {
+    const listed: ListObjectsV2CommandOutput = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: env.S3_BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    );
+
+    const objects = (listed.Contents ?? [])
+      .map((o) => o.Key)
+      .filter((k): k is string => typeof k === 'string')
+      .map((Key) => ({ Key }));
+
+    if (objects.length > 0) {
+      const deleted = await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: env.S3_BUCKET_NAME,
+          Delete: { Objects: objects, Quiet: true },
+        }),
+      );
+      if (deleted.Errors && deleted.Errors.length > 0) {
+        const summary = deleted.Errors.map((e) =>
+          `${e.Key ?? '?'}: ${e.Code ?? ''} ${e.Message ?? ''}`.trim(),
+        ).join('; ');
+        throw new Error(
+          `deleteObjectsByPrefix: ${deleted.Errors.length} key(s) failed to delete: ${summary}`,
+        );
+      }
+    }
+
+    continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+  } while (continuationToken);
 }
 
 /**
