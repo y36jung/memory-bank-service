@@ -328,6 +328,49 @@ describe('auth identity flow — /api/auth/{register,login,refresh,logout}', () 
       });
     });
 
+    it('#5b login with a malformed email (fails Zod .email(), never reaches the handler) -> 401 INVALID_CREDENTIALS, not 500', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { email: 'test', password: 'whatever123' },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json()).toEqual({
+        data: null,
+        error: { code: 'INVALID_CREDENTIALS', message: expect.any(String) },
+      });
+    });
+
+    it('#5c login with a too-short password (fails Zod .min(8)) -> 401 INVALID_CREDENTIALS, not 500', async () => {
+      const user = await seedUser('short-pw');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { email: user.email, password: 'short' },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json()).toEqual({
+        data: null,
+        error: { code: 'INVALID_CREDENTIALS', message: expect.any(String) },
+      });
+    });
+
+    it('#5d login with password field omitted entirely -> 401 INVALID_CREDENTIALS, not 500', async () => {
+      const user = await seedUser('missing-pw-field');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { email: user.email },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json()).toEqual({
+        data: null,
+        error: { code: 'INVALID_CREDENTIALS', message: expect.any(String) },
+      });
+    });
+
     it('#9 expired refresh token -> 401 UNAUTHORIZED and the cookie is cleared', async () => {
       const user = await seedUser('expired-rt');
       const { raw } = await seedRefreshToken(user.id, { expiresAt: new Date(Date.now() - 1000) });

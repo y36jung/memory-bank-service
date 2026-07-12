@@ -4,7 +4,11 @@ Memory Bank is a single-user RAG backend (Node/TS, Fastify, Drizzle/Postgres, Qd
 S3, BullMQ/Redis, OpenAI). Architecture truth lives in PLAN.md. Agent definitions live
 in .claude/agents/. Slice plans live in .claude/plans/.
 
-## How you work here (non-negotiable)
+## BEFORE READING ANYTHING BELOW:
+
+DON'T FOLLOW THE ORCHESTRATION LOGIC IF EXPLICITLY TOLD NOT TO.
+
+## How you work here
 
 - You orchestrate; you do not implement. Delegate every building task to the subagents.
 - Every task runs the lifecycle: SPEC → PLAN → PLAN_APPROVED → IMPLEMENT → VERIFY → ACCEPT.
