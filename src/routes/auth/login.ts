@@ -1,3 +1,4 @@
+import type { FastifyError } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
 import { eq } from 'drizzle-orm';
@@ -11,7 +12,7 @@ import {
   generateRefreshToken,
   hashRefreshToken,
 } from '../../lib/refreshToken.js';
-import { sendSuccess, AppError } from '../../lib/errors.js';
+import { sendSuccess, AppError, fastifyErrorHandler } from '../../lib/errors.js';
 import { env } from '../../config/env.js';
 
 // §3.1-B: cookie path is the minimal common prefix of /refresh and /logout.
@@ -24,6 +25,24 @@ const REFRESH_COOKIE_OPTIONS = {
 };
 
 export const loginRoute: FastifyPluginAsyncZod = async (app) => {
+  // Scoped to this plugin's Fastify encapsulation context only (loginRoute
+  // isn't wrapped with fastify-plugin, so this doesn't leak to register/
+  // refresh/logout or the global handler in server.ts). Any malformed input
+  // (bad email shape, short/missing password, unparsable body) is treated
+  // the same as wrong credentials, so the endpoint never reveals validation
+  // internals or 500s on a bad request.
+  app.setErrorHandler((error: FastifyError, request, reply) => {
+    if (!(error instanceof AppError) && error.statusCode === 400) {
+      fastifyErrorHandler(
+        new AppError('INVALID_CREDENTIALS', 'Invalid email or password', 401),
+        request,
+        reply,
+      );
+      return;
+    }
+    fastifyErrorHandler(error, request, reply);
+  });
+
   // Derived from hashPassword() (src/lib/password.ts) so it always tracks
   // BCRYPT_COST. Precomputed once at plugin registration and captured in the
   // handler closure so the not-found / no-password path runs an
