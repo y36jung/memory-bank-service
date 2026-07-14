@@ -24,6 +24,11 @@ export interface QueryClassification {
   filters: MetadataFilters | null;
 }
 
+export type HistoryScope =
+  | { mode: 'recent' }
+  | { mode: 'full_session' }
+  | { mode: 'count'; count: number };
+
 // ─── Validation schema ─────────────────────────────────────────────────────────
 
 // z.string().datetime() rejects date-only strings like "2024-01-01"; use refine instead.
@@ -41,6 +46,17 @@ const MetadataFiltersSchema = z
     sourceType: z.enum(['upload', 'gmail', 'gdrive', 'outlook', 'onedrive']).optional(),
     timeRangeStartSecs: z.number().finite().nonnegative().optional(),
     timeRangeEndSecs: z.number().finite().nonnegative().optional(),
+  })
+  .strip();
+
+// count is clamped, not rejected, when out of range — see classifyHistoryScope.
+const HISTORY_SCOPE_COUNT_MIN = 1;
+const HISTORY_SCOPE_COUNT_MAX = 500;
+
+const HistoryScopeSchema = z
+  .object({
+    mode: z.enum(['recent', 'full_session', 'count']),
+    count: z.number().finite().positive().optional(),
   })
   .strip();
 
@@ -112,6 +128,34 @@ const EXTRACT_FILTERS_TOOL: OpenAI.ChatCompletionTool = {
         },
       },
       required: ['intent'],
+    },
+  },
+};
+
+const CLASSIFY_HISTORY_SCOPE_TOOL: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'classify_history_scope',
+    description:
+      "Classify how much prior chat history from the CURRENT session should be included when answering the user's message. Always set mode.",
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['recent', 'full_session', 'count'],
+          description:
+            '\'recent\': the default — ordinary follow-ups with no explicit history request, e.g. "can you elaborate on that?", "what about the second one?". ' +
+            '\'full_session\': the user wants to enumerate or recall the whole conversation with NO number stated, e.g. "list all the questions I\'ve asked", "what have we talked about in this session". ' +
+            '\'count\': the query states an explicit number of prior messages/turns, e.g. "what did I ask in the last 7 messages", "summarize my previous 10 questions".',
+        },
+        count: {
+          type: 'number',
+          description:
+            'The explicit number of prior messages requested. Set ONLY when mode is "count", and only to a number actually stated or clearly implied by the query — never guessed.',
+        },
+      },
+      required: ['mode'],
     },
   },
 };
@@ -213,4 +257,71 @@ export async function classifyQuery(
   }
 
   return { intent, filters };
+}
+
+/**
+ * Calls GPT-4o-mini with a tool call to classify how much prior chat history
+ * (from the current session only) should be included when answering the
+ * query. Degrades to `{ mode: 'recent' }` — today's fixed-depth behavior —
+ * on any API error, parse error, or validation failure, so a classifier
+ * outage never causes an unbounded history fetch.
+ *
+ * An explicit `count` is only ever extracted from a number stated in the
+ * query text (e.g. "last 7 messages") — the LLM never has to invent a count,
+ * since it has no way to know a session's true message total. That's why
+ * "list all my questions" maps to 'full_session', not a guessed count.
+ */
+export async function classifyHistoryScope(query: string): Promise<HistoryScope> {
+  const DEFAULT_SCOPE: HistoryScope = { mode: 'recent' };
+
+  let response: OpenAI.ChatCompletion;
+  try {
+    response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 128,
+      tools: [CLASSIFY_HISTORY_SCOPE_TOOL],
+      tool_choice: 'required',
+      messages: [{ role: 'user', content: query }],
+    });
+  } catch (err) {
+    console.error('classifyHistoryScope: OpenAI API error, falling back to recent history:', err);
+    return DEFAULT_SCOPE;
+  }
+
+  const toolCall = response.choices[0]?.message?.tool_calls?.[0];
+  if (!toolCall || toolCall.type !== 'function') {
+    return DEFAULT_SCOPE;
+  }
+
+  let rawInput: unknown;
+  try {
+    rawInput = JSON.parse(toolCall.function.arguments);
+  } catch {
+    console.error(
+      'classifyHistoryScope: failed to parse tool call arguments, falling back to recent history',
+    );
+    return DEFAULT_SCOPE;
+  }
+
+  const parseResult = HistoryScopeSchema.safeParse(rawInput);
+  if (!parseResult.success) {
+    console.error(
+      'classifyHistoryScope: invalid structure from LLM, falling back to recent history:',
+      parseResult.error.issues,
+    );
+    return DEFAULT_SCOPE;
+  }
+
+  const { mode, count } = parseResult.data;
+
+  if (mode === 'count') {
+    if (count === undefined) return DEFAULT_SCOPE;
+    const clamped = Math.min(
+      Math.max(Math.trunc(count), HISTORY_SCOPE_COUNT_MIN),
+      HISTORY_SCOPE_COUNT_MAX,
+    );
+    return { mode: 'count', count: clamped };
+  }
+
+  return { mode };
 }

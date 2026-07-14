@@ -304,7 +304,13 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
 7. GPT-4o chat completion (streaming)
    System prompt: instructs the model to answer from context only,
                   cite sources, and say "I don't know" when context is insufficient
-   Messages: [system, ...recent chat history (last 6), user]
+   Messages: [system, ...chat history, user]
+   History depth is dynamic, classified per-query from the current session only
+   (never cross-session): 'recent' (last 6, the default) | 'full_session'
+   (every message — for "list all my questions" style queries, which state no
+   number) | an explicit count extracted from the query text itself (e.g.
+   "last 7 messages" → 7; never a guessed number). Capped by a token budget
+   that drops the oldest messages first if exceeded.
 
 8. Stream SSE response to client
    As tokens arrive from OpenAI, forward them as SSE events

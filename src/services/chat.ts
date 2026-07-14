@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { messages, chatSessions } from '../db/schema.js';
 import { eq, desc, and } from 'drizzle-orm';
 import { retrieve, type RetrievedChunk, type RetrievedDocument } from './retrieval.js';
+import { classifyHistoryScope, type HistoryScope } from './queryClassifier.js';
 import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
 import { countTokens } from '../lib/tokenizer.js';
@@ -16,16 +17,24 @@ const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
 /**
  * Maximum number of tokens to use for the assembled context block.
- * Leaves room for the system prompt, the last-6-turn history, the user
- * message, and the model's response within GPT-4o's context window.
+ * Leaves room for the system prompt, history, the user message, and the
+ * model's response within GPT-4o's context window.
  */
 const MAX_CONTEXT_TOKENS = 100_000;
 
 /**
- * Number of prior assistant/user turns included in every chat completion.
- * PLAN.md §Query Pipeline step 7: "[system, ...recent chat history (last 6), user]"
+ * Default depth for the 'recent' history scope (today's original fixed
+ * behavior). PLAN.md §Query Pipeline step 7.
  */
 const HISTORY_DEPTH = 6;
+
+/**
+ * Token budget for the history block, checked whenever history-scope
+ * classification resolves to more than HISTORY_DEPTH messages ('full_session'
+ * or an explicit 'count'). Well under MAX_CONTEXT_TOKENS, leaving headroom
+ * for the document context block + system prompt + response.
+ */
+const MAX_HISTORY_TOKENS = 20_000;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -114,6 +123,45 @@ function buildDocumentListContext(docs: RetrievedDocument[]): string {
   return header + rows + '\n';
 }
 
+/**
+ * Load chat history for the current session, resolving `historyScope` into a
+ * concrete row limit ('recent' → HISTORY_DEPTH, 'count' → the extracted
+ * count, 'full_session' → unbounded), then applying a token-budget guard so
+ * an unbounded or large-count fetch can't blow past MAX_HISTORY_TOKENS. Rows
+ * are fetched newest-first so truncation drops the oldest messages when over
+ * budget, then reversed to chronological order for the completion request.
+ */
+async function loadHistory(sessionId: string, historyScope: HistoryScope) {
+  const limit =
+    historyScope.mode === 'recent'
+      ? HISTORY_DEPTH
+      : historyScope.mode === 'count'
+        ? historyScope.count
+        : undefined;
+
+  const baseQuery = db
+    .select({ role: messages.role, content: messages.content })
+    .from(messages)
+    .where(eq(messages.sessionId, sessionId))
+    .orderBy(desc(messages.createdAt));
+
+  const rows = limit !== undefined ? await baseQuery.limit(limit) : await baseQuery;
+
+  const kept: (typeof rows)[number][] = [];
+  let totalTokens = 0;
+
+  for (const row of rows) {
+    const rowTokens = countTokens(row.content);
+    if (totalTokens + rowTokens > MAX_HISTORY_TOKENS) {
+      break;
+    }
+    kept.push(row);
+    totalTokens += rowTokens;
+  }
+
+  return kept.reverse();
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -143,8 +191,12 @@ export async function streamChatResponse(
     throw new AppError('SESSION_NOT_FOUND', 'Session not found', 404);
   }
 
-  // ── Step 2: Retrieve grounding context ───────────────────────────────────
-  const retrievalResult = await retrieve(userId, userMessage);
+  // ── Step 2: Retrieve grounding context + classify history scope ──────────
+  // Independent of each other — run in parallel.
+  const [retrievalResult, historyScope] = await Promise.all([
+    retrieve(userId, userMessage),
+    classifyHistoryScope(userMessage),
+  ]);
 
   // ── Step 3: Insert user message ──────────────────────────────────────────
   await db.insert(messages).values({
@@ -178,15 +230,8 @@ export async function streamChatResponse(
   const systemContent =
     contextString.length > 0 ? `${SYSTEM_PROMPT}\n\n${contextString}` : SYSTEM_PROMPT;
 
-  // ── Step 5: Load recent chat history (last HISTORY_DEPTH messages) ────────
-  const historyRows = (
-    await db
-      .select({ role: messages.role, content: messages.content })
-      .from(messages)
-      .where(eq(messages.sessionId, sessionId))
-      .orderBy(desc(messages.createdAt))
-      .limit(HISTORY_DEPTH)
-  ).reverse();
+  // ── Step 5: Load chat history per the classified scope ────────────────────
+  const historyRows = await loadHistory(sessionId, historyScope);
 
   // ── Step 7: Open GPT-4o streaming completion ──────────────────────────────
   const systemMsg: OpenAI.Chat.ChatCompletionMessageParam = {
