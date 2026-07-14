@@ -284,7 +284,7 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
 
 3. Search Qdrant
    collection: 'memory_bank'
-   top_k: 10
+   top_k: max(final_top_k * 3, 20)  — over-fetched candidate pool for reranking (step 5)
    score_threshold: 0.4  (configurable)
    with_payload: false   (Qdrant returns only vector IDs and scores — no content)
 
@@ -293,8 +293,10 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
    WHERE qdrant_id = ANY([:qdrantIds])
    Single query; results joined with Qdrant scores in application layer
 
-5. (Optional) Rerank
-   Simple score-based cutoff for now; Cohere Rerank can slot in later
+5. Rerank
+   Local cross-encoder (ms-marco-MiniLM via @xenova/transformers) scores each
+   candidate against the raw query (not the HyDE text used for embedding) and
+   truncates the widened candidate pool down to the final top_k.
 
 6. Build context
    Concatenate top chunks with source attribution headers
@@ -613,8 +615,7 @@ A Next.js 15 app (App Router) with:
 **4. Hybrid Search**
 Combine dense vector search (Qdrant) with sparse BM25 keyword search. Qdrant supports sparse vectors natively (as of v1.7). Merge results with Reciprocal Rank Fusion (RRF) before the reranking step. Dramatically improves recall for queries with rare keywords, names, and identifiers.
 
-**5. Reranking**
-Add Cohere Rerank or a local cross-encoder (e.g., `ms-marco-MiniLM`) as a post-retrieval step before context assembly. Improves precision when top-k retrieval returns noisy results.
+**5. Reranking — implemented.** See Query Pipeline step 5. A local cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2` via `@xenova/transformers`) reranks an over-fetched candidate pool before context assembly. No external vendor/API — first request after a cold start incurs a one-time ONNX model load.
 
 **6. Slack Integration**
 Use the Slack Web API to ingest channel messages and thread history. Treat each thread as a document. Useful for teams repurposing this as a shared knowledge base.
