@@ -1,10 +1,23 @@
 /**
- * Unit tests for src/services/queryClassifier.ts — classifyQuery
+ * Unit tests for src/services/queryClassifier.ts — classifyQuery,
+ * classifyHistoryScope
  *
  * Mocks: openai, ../../../src/config/env.js
  * No real network calls.
  *
- * Criteria covered:
+ * classifyHistoryScope criteria (AC-HS):
+ * AC-HS-CQ-1: mode: 'recent' → { mode: 'recent' }
+ * AC-HS-CQ-2: mode: 'full_session' → { mode: 'full_session' }
+ * AC-HS-CQ-3: mode: 'count' with a count → { mode: 'count', count }
+ * AC-HS-CQ-4: count above the max clamp is clamped down, not rejected
+ * AC-HS-CQ-5: count below the min clamp is clamped up, not rejected
+ * AC-HS-CQ-6: mode: 'count' with no count → degrades to { mode: 'recent' }
+ * AC-HS-CQ-7: API error → degrades to { mode: 'recent' }
+ * AC-HS-CQ-8: no tool call in response → degrades to { mode: 'recent' }
+ * AC-HS-CQ-9: invalid JSON in tool call arguments → degrades to { mode: 'recent' }
+ * AC-HS-CQ-10: tool_choice is set to 'required'
+ *
+ * Criteria covered (classifyQuery):
  * AC-CQ-1: tool_choice is set to 'required'
  * AC-CQ-2: returns null when LLM returns search_content with no filters (hasAnyFilter guard)
  * AC-CQ-3: returns null when LLM makes no tool call (choices[0].message has no tool_calls)
@@ -45,7 +58,7 @@ vi.mock('../../../src/config/env.js', () => ({
   env: { OPENAI_API_KEY: 'sk-test-key' },
 }));
 
-import { classifyQuery } from '../../../src/services/queryClassifier.js';
+import { classifyQuery, classifyHistoryScope } from '../../../src/services/queryClassifier.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -424,5 +437,96 @@ describe('AC-CQ-13: topic-based document enumeration → list_documents', () => 
     expect(result).not.toBeNull();
     expect(result?.intent).toBe('list_documents');
     expect(result?.filters).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyHistoryScope
+// ---------------------------------------------------------------------------
+
+describe('AC-HS-CQ-1/2/3: extracts mode (and count) from the tool call', () => {
+  it('returns { mode: "recent" } for mode: "recent"', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'recent' }));
+
+    const result = await classifyHistoryScope('can you elaborate on that?');
+    expect(result).toEqual({ mode: 'recent' });
+  });
+
+  it('returns { mode: "full_session" } for mode: "full_session"', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'full_session' }));
+
+    const result = await classifyHistoryScope("list all the questions I've asked");
+    expect(result).toEqual({ mode: 'full_session' });
+  });
+
+  it('returns { mode: "count", count } for mode: "count" with an explicit count', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'count', count: 7 }));
+
+    const result = await classifyHistoryScope('what did I ask in the last 7 messages?');
+    expect(result).toEqual({ mode: 'count', count: 7 });
+  });
+});
+
+describe('AC-HS-CQ-4/5: count is clamped, not rejected, when out of range', () => {
+  it('clamps a count above the max down to 500', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'count', count: 10_000 }));
+
+    const result = await classifyHistoryScope('what did I ask in the last 10000 messages?');
+    expect(result).toEqual({ mode: 'count', count: 500 });
+  });
+
+  it('clamps a non-integer count down to an integer within range', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'count', count: 3.7 }));
+
+    const result = await classifyHistoryScope('what did I ask in the last few messages?');
+    expect(result).toEqual({ mode: 'count', count: 3 });
+  });
+});
+
+describe('AC-HS-CQ-6: mode "count" with no count degrades to recent', () => {
+  it('returns { mode: "recent" } when mode is "count" but count is missing', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'count' }));
+
+    const result = await classifyHistoryScope('some ambiguous query');
+    expect(result).toEqual({ mode: 'recent' });
+  });
+});
+
+describe('AC-HS-CQ-7: API error degrades to recent', () => {
+  it('returns { mode: "recent" } when openai.chat.completions.create rejects', async () => {
+    mockChatCreate.mockRejectedValue(new Error('OpenAI 401 Unauthorized'));
+
+    const result = await classifyHistoryScope('some query');
+    expect(result).toEqual({ mode: 'recent' });
+  });
+});
+
+describe('AC-HS-CQ-8: no tool call degrades to recent', () => {
+  it('returns { mode: "recent" } when choices[0].message has no tool_calls', async () => {
+    mockChatCreate.mockResolvedValue(makeNoToolCallResponse());
+
+    const result = await classifyHistoryScope('some query');
+    expect(result).toEqual({ mode: 'recent' });
+  });
+});
+
+describe('AC-HS-CQ-9: invalid JSON in tool call arguments degrades to recent', () => {
+  it('returns { mode: "recent" } when tool_calls[0].function.arguments is invalid JSON', async () => {
+    mockChatCreate.mockResolvedValue(makeRawArgsResponse('not valid json {{{'));
+
+    const result = await classifyHistoryScope('some query');
+    expect(result).toEqual({ mode: 'recent' });
+  });
+});
+
+describe('AC-HS-CQ-10: tool_choice is required', () => {
+  it('calls openai.chat.completions.create with tool_choice = "required"', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'recent' }));
+
+    await classifyHistoryScope('some query');
+
+    expect(mockChatCreate).toHaveBeenCalledTimes(1);
+    const callArgs = mockChatCreate.mock.calls[0][0];
+    expect(callArgs.tool_choice).toBe('required');
   });
 });
