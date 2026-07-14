@@ -60,6 +60,10 @@ vi.mock('../../../src/services/queryClassifier.js', () => ({
   classifyQuery: vi.fn().mockResolvedValue(null), // default: no metadata intent → pure vector path
 }));
 
+vi.mock('../../../src/services/reranker.js', () => ({
+  rerank: vi.fn(),
+}));
+
 vi.mock('../../../src/db/index.js', () => {
   const selectMock = {
     from: vi.fn().mockReturnThis(),
@@ -77,8 +81,10 @@ vi.mock('../../../src/db/index.js', () => {
 import * as embeddings from '../../../src/services/embeddings.js';
 import * as qdrant from '../../../src/services/qdrant.js';
 import * as queryClassifierModule from '../../../src/services/queryClassifier.js';
+import * as rerankerModule from '../../../src/services/reranker.js';
 import { db } from '../../../src/db/index.js';
 import { retrieveChunks, retrieve } from '../../../src/services/retrieval.js';
+import type { RetrievedChunk } from '../../../src/services/retrieval.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -158,6 +164,16 @@ beforeEach(() => {
   vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue(null);
   // Default batchEmbed: returns a valid vector
   mockEmbeddings();
+  // Default rerank mock: sorts by the existing chunk.score (vector or fused)
+  // and truncates to topN, without overwriting scores — stands in for the
+  // real cross-encoder so callers still see sorted, bounded results.
+  vi.mocked(rerankerModule.rerank).mockImplementation(
+    async (_query: string, chunks: RetrievedChunk[], topN: number) =>
+      chunks
+        .slice()
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topN),
+  );
   // Re-establish the select chain mock after reset
   const basicChain = makeSelectChain([]);
   vi.mocked(db.select).mockReturnValue(basicChain as unknown as ReturnType<typeof db.select>);
@@ -381,20 +397,47 @@ describe('retrieveChunks', () => {
     expect(result[0]?.documentName).toBe('my-important-document.pdf');
   });
 
-  it('passes topK and scoreThreshold to searchPoints', async () => {
+  it('passes a widened candidate pool (topK * 3, min 20) and scoreThreshold to searchPoints', async () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     await retrieveChunks(TEST_USER_ID, 'query', 5, 0.7);
 
-    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 5, 0.7);
+    // candidatePoolSize = max(5*3, 20) = 20 — over-fetched for the reranker.
+    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 20, 0.7);
   });
 
-  it('uses defaults topK=10 and scoreThreshold=0.4 when not provided', async () => {
+  it('uses defaults topK=10 and scoreThreshold=0.4, widening the candidate pool to 30', async () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     await retrieveChunks(TEST_USER_ID, 'query');
 
-    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 10, 0.4);
+    // candidatePoolSize = max(10*3, 20) = 30.
+    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 30, 0.4);
+  });
+
+  it('calls rerank() with the raw query and the final topK as truncation size', async () => {
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-1', score: 0.9 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([
+        {
+          id: 'chunk-pg-id-1',
+          qdrantId: 'qdrant-uuid-1',
+          documentId: 'doc-id-1',
+          content: 'content',
+          originalName: 'doc.txt',
+          createdAt: new Date(),
+          sourceType: 'upload',
+          mimeType: 'text/plain',
+          sizeBytes: null,
+          startSecs: null,
+          endSecs: null,
+        },
+      ]) as unknown as ReturnType<typeof db.select>,
+    );
+
+    await retrieveChunks(TEST_USER_ID, 'the raw query', 7, 0.4);
+
+    expect(rerankerModule.rerank).toHaveBeenCalledWith('the raw query', expect.any(Array), 7);
   });
 });
 

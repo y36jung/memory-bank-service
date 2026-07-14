@@ -5,6 +5,7 @@ import { batchEmbed } from './embeddings.js';
 import { searchPoints } from './qdrant.js';
 import { eq, inArray, and, gte, lte, asc, desc, sql } from 'drizzle-orm';
 import { type MetadataFilters, classifyQuery } from './queryClassifier.js';
+import { rerank } from './reranker.js';
 import { env } from '../config/env.js';
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
@@ -44,6 +45,12 @@ export type RetrievalResult =
 
 const CONTENT_WEIGHT = 0.5;
 const METADATA_WEIGHT = 0.5;
+
+// Candidate pool fetched from Qdrant/metadata-SQL before reranking — wider than
+// the final topK so the cross-encoder has real candidates to discriminate
+// between, not just the final result count.
+const RERANK_CANDIDATE_MULTIPLIER = 3;
+const MIN_RERANK_CANDIDATE_POOL = 20;
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -243,6 +250,10 @@ export async function retrieve(
     return { type: 'document_list', documents: docs };
   }
 
+  // Over-fetch beyond topK so the reranker has real candidates to discriminate
+  // between, not just the final result count.
+  const candidatePoolSize = Math.max(topK * RERANK_CANDIDATE_MULTIPLIER, MIN_RERANK_CANDIDATE_POOL);
+
   // Vector chain and metadata SQL are independent once classification + hydeText are ready.
   const [vectorChunksOrNull, sqlChunks] = await Promise.all([
     // Vector chain: embed → Qdrant → Postgres hydration.
@@ -250,7 +261,7 @@ export async function retrieve(
       const [vector] = await batchEmbed([hydeText]);
       if (vector === undefined) return null;
 
-      const qdrantResults = await searchPoints(userId, vector, topK, scoreThreshold);
+      const qdrantResults = await searchPoints(userId, vector, candidatePoolSize, scoreThreshold);
       if (qdrantResults.length === 0) return [];
 
       const qdrantIds = qdrantResults.map((r) => r.id);
@@ -299,43 +310,51 @@ export async function retrieve(
     })(),
     // Metadata SQL path: resolves to [] immediately if no classification/filters.
     classification?.filters
-      ? retrieveByMetadata(userId, classification.filters, topK)
+      ? retrieveByMetadata(userId, classification.filters, candidatePoolSize)
       : Promise.resolve([] as RetrievedChunk[]),
   ]);
 
   if (vectorChunksOrNull === null) return { type: 'chunk_results', chunks: [] };
   const vectorChunks = vectorChunksOrNull;
 
-  // If no metadata filters, return vector results sorted by score.
+  // If no metadata filters, candidates are the vector results as-is (order
+  // doesn't matter — rerank() below re-sorts).
+  let candidates: RetrievedChunk[];
+
   if (!classification) {
-    return { type: 'chunk_results', chunks: vectorChunks.sort((a, b) => b.score - a.score) };
-  }
+    candidates = vectorChunks;
+  } else {
+    // Score fusion: merge both sets, combine content + metadata scores.
+    type FusionEntry = { chunk: RetrievedChunk; contentScore: number; metadataScore: number };
+    const map = new Map<string, FusionEntry>();
 
-  // Score fusion: merge both sets, combine content + metadata scores.
-  type FusionEntry = { chunk: RetrievedChunk; contentScore: number; metadataScore: number };
-  const map = new Map<string, FusionEntry>();
-
-  for (const c of vectorChunks) {
-    map.set(c.chunkId, { chunk: c, contentScore: c.score, metadataScore: 0 });
-  }
-  for (const c of sqlChunks) {
-    const existing = map.get(c.chunkId);
-    if (existing) {
-      existing.metadataScore = c.score;
-    } else {
-      map.set(c.chunkId, { chunk: c, contentScore: 0, metadataScore: c.score });
+    for (const c of vectorChunks) {
+      map.set(c.chunkId, { chunk: c, contentScore: c.score, metadataScore: 0 });
     }
+    for (const c of sqlChunks) {
+      const existing = map.get(c.chunkId);
+      if (existing) {
+        existing.metadataScore = c.score;
+      } else {
+        map.set(c.chunkId, { chunk: c, contentScore: 0, metadataScore: c.score });
+      }
+    }
+
+    candidates = Array.from(map.values())
+      .map(({ chunk, contentScore, metadataScore }) => ({
+        ...chunk,
+        score: CONTENT_WEIGHT * contentScore + METADATA_WEIGHT * metadataScore,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, candidatePoolSize);
   }
 
-  const fusedChunks = Array.from(map.values())
-    .map(({ chunk, contentScore, metadataScore }) => ({
-      ...chunk,
-      score: CONTENT_WEIGHT * contentScore + METADATA_WEIGHT * metadataScore,
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
+  if (candidates.length === 0) return { type: 'chunk_results', chunks: [] };
 
-  return { type: 'chunk_results', chunks: fusedChunks };
+  // Final step: rerank the candidate pool with the local cross-encoder and
+  // truncate to topK. Reranks against the raw query, not the HyDE text.
+  const rerankedChunks = await rerank(query, candidates, topK);
+  return { type: 'chunk_results', chunks: rerankedChunks };
 }
 
 /**
