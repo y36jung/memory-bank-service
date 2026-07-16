@@ -1,0 +1,115 @@
+DATABASE FUNDAMENTALS FOR APPLICATION DEVELOPERS
+=================================================
+
+Understanding databases at a conceptual level — not just how to write queries, but how they work — is what separates developers who solve data problems from developers who create them. This guide covers the core concepts every backend engineer needs to internalize.
+
+RELATIONAL VS NON-RELATIONAL DATABASES
+---------------------------------------
+
+Relational Databases (RDBMS): PostgreSQL, MySQL, SQLite, SQL Server
+Data is organized into tables (relations) with rows and columns. Relationships between tables are expressed through foreign keys. Schema is defined upfront and enforced by the database engine.
+
+Strengths:
+- ACID guarantees: data integrity even under concurrent writes or failures
+- Powerful query language (SQL) with joins, aggregations, window functions
+- Mature tooling, widespread expertise
+- Well-understood consistency and isolation semantics
+
+Best for: Financial systems, order management, user accounts, any domain where data integrity and relational structure matter.
+
+Document Databases (MongoDB, CouchDB):
+Store data as JSON-like documents. Schema-flexible — each document can have different fields. Queries operate on document fields, including nested objects and arrays.
+
+Strengths: Natural fit for hierarchical data, no impedance mismatch with JSON APIs, horizontal scaling for write-heavy workloads.
+Weaknesses: Multi-document transactions are limited or expensive. No joins — denormalization required. Consistency guarantees historically weaker (though modern versions have improved).
+
+Key-Value Stores (Redis, DynamoDB):
+Fastest read/write performance. Data is accessed only by key. Redis adds data structures (sets, sorted sets, lists, pub/sub) on top.
+
+Wide-Column Stores (Cassandra, HBase):
+Designed for massive write throughput distributed across many nodes. Excellent for time-series data and event logs. Tunable consistency. Queries are limited compared to SQL.
+
+ACID PROPERTIES
+---------------
+
+Atomicity: A transaction is all-or-nothing. If a bank transfer debits Account A but the credit to Account B fails, the entire transaction rolls back. No partial writes.
+
+Consistency: A transaction brings the database from one valid state to another. Constraints (NOT NULL, UNIQUE, FOREIGN KEY, CHECK) are enforced at transaction boundaries.
+
+Isolation: Concurrent transactions execute as if they were serial. The level of isolation is configurable:
+  Read Uncommitted: Can read uncommitted changes from other transactions (dirty reads). Rarely used.
+  Read Committed:   Only reads committed data. Prevents dirty reads. PostgreSQL default.
+  Repeatable Read:  Same row reads within a transaction return the same value. Prevents non-repeatable reads.
+  Serializable:     Full isolation. Prevents phantom reads. Highest correctness, highest cost.
+
+Durability: Once a transaction commits, it survives system failure. Achieved via write-ahead logging (WAL) — changes are written to an append-only log before being applied to data pages. On crash recovery, the WAL is replayed.
+
+INDEXING STRATEGIES
+-------------------
+
+An index is a separate data structure that allows the database to find rows without scanning the entire table. Without indexes, every query is a full table scan — O(n) regardless of how specific the WHERE clause is.
+
+B-Tree Index (default): Balanced tree structure. Supports equality, range, ORDER BY, and prefix matching. Logarithmic lookup. Used for almost all general-purpose indexing.
+
+Hash Index: Maps keys to locations via a hash function. O(1) equality lookups but cannot serve range queries or ordering. Redis uses hash indexes extensively; PostgreSQL supports them but B-tree is usually preferred.
+
+Composite Index: An index on multiple columns. Column order matters. An index on (last_name, first_name) can serve queries filtering on last_name alone or both columns, but NOT first_name alone.
+  Rule: Put the most selective column first, except when optimizing for a specific query pattern.
+
+Partial Index: An index with a WHERE condition. Smaller and faster than a full-column index when queries consistently filter on a known condition.
+  Example: CREATE INDEX ON orders (created_at) WHERE status = 'pending';
+
+Covering Index: An index that contains all columns needed by a query — no table heap access required. Dramatically faster for read-heavy queries. Also called an index-only scan.
+
+Index Pitfalls:
+- Every index slows writes (INSERT, UPDATE, DELETE must update all affected indexes)
+- Too many indexes bloat storage and slow ingestion
+- Indexes on low-cardinality columns (boolean, status with 3 values) are often unused by the planner
+- Unused indexes waste resources — regularly review pg_stat_user_indexes
+
+QUERY OPTIMIZATION
+------------------
+
+EXPLAIN ANALYZE is your primary tool. It shows the actual execution plan: which index was used, estimated vs actual row counts, and time spent at each node.
+
+Seq Scan (Sequential Scan): Full table scan. Not always bad for small tables or when fetching a large fraction of rows.
+
+Index Scan: Uses an index to find row locations, then fetches from heap.
+
+Index Only Scan: Uses a covering index — no heap access needed. Fastest possible.
+
+Bitmap Heap Scan: Combines multiple indexes and resolves heap accesses in page-order. Used when multiple conditions each have their own index.
+
+N+1 Query Problem: Fetching a list of N records then issuing N additional queries for related data. Classic ORM trap. Fix with JOIN or an explicit subquery / batch load.
+
+NORMALIZATION
+-------------
+
+Normalization organizes data to reduce redundancy and improve integrity.
+
+1NF (First Normal Form): Atomic values. No repeating groups or arrays within a cell.
+2NF: No partial dependencies on a composite primary key. Each non-key attribute depends on the entire key.
+3NF: No transitive dependencies. Non-key attributes depend only on the primary key, not on other non-key attributes.
+BCNF: Stricter version of 3NF. Every determinant is a candidate key.
+
+Denormalization: Intentionally violating normalization to improve read performance. Store derived or frequently-joined data in the same row to avoid expensive joins. Always a trade-off: faster reads, harder writes, risk of data inconsistency.
+
+TRANSACTIONS IN PRACTICE
+-------------------------
+
+BEGIN;
+  UPDATE accounts SET balance = balance - 500 WHERE id = 'A';
+  UPDATE accounts SET balance = balance + 500 WHERE id = 'B';
+  -- Both succeed or neither applies
+COMMIT;
+
+Optimistic Concurrency Control: Read a record with its version number. On update, check that the version hasn't changed. If it has, retry. No locks held during the read phase — high throughput for low-conflict workloads.
+
+Pessimistic Concurrency Control: Acquire a lock before reading the record (SELECT FOR UPDATE). Prevents conflicts but reduces concurrency. Use when conflict rate is high or the cost of a failed retry is high.
+
+Deadlock: Two transactions each hold a lock the other needs. The database detects and aborts one to break the cycle. Prevent deadlocks by always acquiring locks in a consistent order across transactions.
+
+CONNECTION POOLING
+------------------
+
+Database connections are expensive to establish (TCP handshake, authentication, session setup). Connection poolers (PgBouncer for PostgreSQL) maintain a pool of persistent connections and multiplex application requests across them. Always use a connection pooler in production; without one, a traffic spike will exhaust the database's connection limit and cause cascading failures.

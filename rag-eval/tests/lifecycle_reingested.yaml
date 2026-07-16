@@ -1,0 +1,7 @@
+# Run only after scripts/lifecycle-eval.mjs has deleted and re-uploaded
+# retirement_planning.md (under the same filename) with updated content.
+- vars:
+    query: 'What is the current IRA contribution limit for a single filer?'
+  assert:
+    - type: llm-rubric
+      value: "States the current IRA contribution limit as $7,500 (or $8,600 for age 50+), presented as the authoritative/current figure. It's fine to also mention the superseded 2024 figures ($7,000/$8,000) for contrast, but the answer must not present $7,000/$8,000 as the current limit or omit the updated $7,500/$8,600 figures — that would mean stale chunks from the previous version leaked in as the primary answer."

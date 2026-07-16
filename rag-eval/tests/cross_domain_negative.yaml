@@ -1,0 +1,21 @@
+# Negative cases: no matching content, keyword-overlap traps, false premises.
+
+- vars:
+    query: "What's the maintenance schedule for my car's timing belt?"
+  assert:
+    - type: llm-rubric
+      value: 'States it cannot find relevant information in the knowledge base rather than fabricating an answer.'
+    - type: not-contains
+      value: 'timing belt should be replaced'
+
+- vars:
+    query: "What's my travel insurance deductible?"
+  assert:
+    - type: llm-rubric
+      value: "Does not answer using unrelated finance or health documents just because they mention insurance/money; either finds genuine travel-insurance content or says it's not available."
+
+- vars:
+    query: 'What did the doctor say about my broken arm?'
+  assert:
+    - type: llm-rubric
+      value: 'Does not confirm or elaborate on the false premise (a broken arm / doctor visit) since no such document exists; states it has no record of this rather than inventing details.'

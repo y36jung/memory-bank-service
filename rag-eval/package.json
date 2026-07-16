@@ -1,0 +1,17 @@
+{
+  "name": "memory-bank-rag-eval",
+  "private": true,
+  "type": "module",
+  "description": "Promptfoo-based eval suite for the Memory Bank RAG pipeline.",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "eval": "promptfoo eval -c promptfooconfig.yaml",
+    "eval:lifecycle": "node scripts/lifecycle-eval.mjs",
+    "eval:all": "npm run eval && npm run eval:lifecycle",
+    "view": "promptfoo view"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2",
+    "promptfoo": "^0.121.19"
+  }
+}
