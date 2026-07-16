@@ -1,0 +1,25 @@
+# Conflicting facts across two ingested documents (budget_draft_a.md: $400/mo
+# groceries, budget_draft_b.md: $550/mo groceries).
+#
+# The scaffold's original second case asserted on `sourceType` diversity
+# ("emails and my uploaded budget spreadsheet"), but OAuth/email ingestion is
+# deferred (PLAN.md § Future Additions) — every document in this service is
+# sourceType 'upload' today, and `Source` doesn't even carry a sourceType
+# field. Replaced with a same-source-type variant that's actually achievable:
+# proving retrieval pulled from *both* conflicting documents, not just one.
+
+- vars:
+    query: 'What is my monthly budget for groceries?'
+  assert:
+    - type: llm-rubric
+      value: 'If the two ingested sources disagree, the answer surfaces both figures ($400 and $550) and attributes each to its source rather than silently picking one, OR explicitly flags the conflict.'
+
+- vars:
+    query: 'Do my two budget drafts agree on my grocery spending? If not, what does each one say?'
+  assert:
+    - type: javascript
+      value: |
+        const documentIds = new Set((context.metadata?.sources || []).map(s => s.documentId));
+        return documentIds.size >= 2; // retrieval must have pulled chunks from both conflicting drafts, not just one
+    - type: llm-rubric
+      value: 'States that the two drafts disagree, citing $400 from one draft and $550 from the other, rather than only reporting one figure.'

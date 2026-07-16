@@ -1,0 +1,49 @@
+# Retrieval precision: multi-chunk and multi-document synthesis, exact
+# factual recall, and paraphrase without semantic gap.
+#
+# Each case pairs a retrieval-layer javascript assert (documentName + a
+# distinctive content substring from the expected passage, per the same
+# reproducibility rationale as semantic_gap.yaml) with an llm-rubric/contains
+# check on the final answer, so a retrieval bug and a generation bug fail
+# distinguishably.
+
+- vars:
+    query: 'What are the 2024 401(k) contribution limits, including the catch-up amount for people 50 and older?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'retirement_planning.md' &&
+          s.content?.includes('$23,000 ($30,500 if age 50 or older')
+        );
+    - type: contains
+      value: '23,000'
+    - type: contains
+      value: '30,500'
+
+- vars:
+    query: 'Compare a Traditional and Roth 401(k) in terms of when I pay tax.'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'retirement_planning.md' &&
+          s.content?.includes('Traditional: Contributions reduce taxable income now')
+        );
+    - type: llm-rubric
+      value: 'Correctly states Traditional contributions reduce taxable income now and are taxed on withdrawal, while Roth contributions are post-tax and withdrawals are tax-free.'
+
+- vars:
+    query: "Give me a plain-language explanation of the difference between an idempotent HTTP method and one that isn't."
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'api_design_principles.txt' &&
+          s.content?.includes('Replace a resource entirely (idempotent)')
+        );
+    - type: llm-rubric
+      value: "Correctly explains idempotency (repeating the request has the same effect as doing it once) using GET/PUT/DELETE as idempotent and POST as the non-idempotent example, without requiring the source text's exact wording."

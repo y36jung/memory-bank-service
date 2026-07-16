@@ -115,98 +115,53 @@ npm run lint      # ESLint
 npm run format    # Prettier
 ```
 
-## 📊 RAG Evaluation (RAGAS)
+## 📊 RAG Evaluation (promptfoo)
 
-`scripts/eval/` contains a Python-based evaluation harness that measures RAG quality using [RAGAS](https://docs.ragas.io/). It calls the live Memory Bank API, fetches retrieved chunk text from Postgres, and runs RAGAS metrics across 15 test cases covering single-chunk lookup, cross-document synthesis, CSV structured queries, vocabulary mismatch, top-k saturation, and more.
+`rag-eval/` is a self-contained [promptfoo](https://www.promptfoo.dev/) suite that measures RAG quality against a live Memory Bank instance: retrieval precision, semantic-gap paraphrase queries, cross-domain negatives, multi-source conflicts, citation correctness, and delete/re-ingest lifecycle staleness. Each test case pairs a retrieval-layer `javascript` assertion (checking the actual chunks returned via `context.metadata.sources`) with an `llm-rubric`/`contains` check on the final answer, so a retrieval bug and a generation bug fail distinguishably.
 
-### Metrics
-
-| Group                 | Test cases    | Metrics                                                       |
-| --------------------- | ------------- | ------------------------------------------------------------- |
-| 1 — no ground truth   | tc-01 → tc-06 | `faithfulness`, `answer_relevancy`                            |
-| 2 — with ground truth | tc-07 → tc-19 | + `context_precision`, `context_recall`, `answer_correctness` |
+It replaces an earlier Python/RAGAS harness that predated this service's JWT auth rollout and no longer worked.
 
 ### Prerequisites
 
 - Memory Bank server running (`npm start`)
 - Docker Compose services running (`docker compose up -d`)
-- Python 3.10+
-- `OPENAI_API_KEY` in `.env`
+- An `OPENAI_API_KEY` (used by promptfoo's `llm-rubric` grading)
 
-### 1. Set up Python environment
-
-```bash
-python3 -m venv scripts/eval/.venv
-source scripts/eval/.venv/bin/activate   # Windows: scripts\eval\.venv\Scripts\activate
-pip install -r scripts/eval/requirements.txt
-python scripts/eval/setup_shim.py
-```
-
-> **Note:** `setup_shim.py` adds a one-line compatibility stub for `langchain_community.chat_models.vertexai`, which RAGAS imports unconditionally but `langchain` v1.x removed. This must be run once after every fresh `pip install`.
-
-### 2. Upload fixture documents
-
-Upload the synthetic fixture documents and wait for indexing to complete:
+### 1. Install and configure
 
 ```bash
-for f in scripts/eval/fixtures/*; do
-  curl -s -X POST http://localhost:3000/api/documents/upload -F "file=@$f" | jq .
-done
-
-# Poll until all documents show "status": "indexed"
-curl -s http://localhost:3000/api/documents | jq '[.data[] | {name:.originalName, status:.status}]'
+cd rag-eval
+npm install
+cp .env.example .env   # fill in OPENAI_API_KEY and eval-user credentials
 ```
 
-### 3. Run the full eval suite
+The eval user is registered automatically (or logged in, if it already exists) by the setup script — no manual account creation needed.
+
+### 2. Upload fixtures and wait for indexing
 
 ```bash
-python scripts/eval/eval.py \
-  --db-url "postgresql://memory_bank:dev-password@localhost:5432/memory_bank_service_db"
+npm run setup
 ```
 
-Results are printed as a colour-coded table and saved to `eval_results_{timestamp}.json`.
-
-### 4. Filter by tag for faster iteration
+### 3. Run the eval suite
 
 ```bash
-# Quick smoke test — single-chunk and factual cases only
-python scripts/eval/eval.py --tags single-chunk factual
-
-# Cross-document synthesis cases
-python scripts/eval/eval.py --tags cross-doc
-
-# Retrieval edge cases
-python scripts/eval/eval.py --tags topk-saturation vocab-mismatch chunk-boundary
+npm run eval    # retrieval_precision, semantic_gap, cross_domain_negative, multi_source_conflict, citation_correctness
+npm run view    # inspect results in promptfoo's local UI
 ```
 
-### 5. Verify re-index idempotency (tc-19)
+### 4. Run the lifecycle suite
+
+The delete/re-ingest cases need ordered state changes a single `promptfoo eval` run can't express, so they run via a dedicated script:
 
 ```bash
-python scripts/eval/eval.py --tags re-index --output before_reindex.json
-
-# Delete and re-upload rest_api_guide.md, then wait for re-indexing...
-
-python scripts/eval/eval.py --tags re-index --output after_reindex.json
-
-python3 -c "
-import json
-b = json.load(open('before_reindex.json'))['results'][0]['metrics']
-a = json.load(open('after_reindex.json'))['results'][0]['metrics']
-for k in b: print(f'{k}: {b[k]:.3f} -> {a[k]:.3f}  diff={abs(b[k]-a[k]):.3f}')
-"
+npm run eval:lifecycle
 ```
 
-Scores should be identical within ±0.05 across runs.
+### All-in-one
 
-### CLI reference
-
+```bash
+npm run eval:all   # setup && eval && eval:lifecycle
 ```
-python scripts/eval/eval.py [options]
 
-Options:
-  --base-url URL    Memory Bank API base URL (default: http://localhost:3000)
-  --db-url URL      Postgres connection string (default: DATABASE_URL env var)
-  --dataset PATH    Path to dataset JSON (default: scripts/eval/dataset.json)
-  --output PATH     Output JSON file (default: eval_results_{timestamp}.json)
-  --tags TAG [...]  Filter test cases by tag (ANY match)
-```
+When a case fails, check whether it's the `javascript` retrieval assertion or the `llm-rubric` answer assertion that failed — they test different layers. A retrieval-assert failure means bad chunking/embedding/search; a rubric-only failure with retrieval passing means a prompting or generation problem.

@@ -1,0 +1,80 @@
+SOFTWARE DESIGN PATTERNS: A PRACTICAL GUIDE
+============================================
+
+Design patterns are reusable solutions to commonly occurring problems in software design. They represent best practices evolved over time by experienced developers. This guide covers the most important creational, structural, and behavioral patterns used in modern software engineering.
+
+CREATIONAL PATTERNS
+-------------------
+
+Singleton Pattern
+The Singleton pattern ensures a class has only one instance and provides a global access point to it. It is commonly used for logging services, configuration managers, thread pools, and database connection pools. The key implementation involves a private constructor, a static instance variable, and a static method that returns the single instance.
+
+Common pitfalls: Singletons can introduce hidden global state, making unit testing difficult. They also violate the Single Responsibility Principle by managing their own lifecycle. In multi-threaded environments, naive implementations are not thread-safe and require double-checked locking or initialization-on-demand patterns.
+
+Factory Method Pattern
+The Factory Method pattern defines an interface for creating an object but lets subclasses decide which class to instantiate. This promotes loose coupling by eliminating the need to bind application-specific classes into the code. For example, a document editor might use a factory method to create different document types (PDF, DOCX, HTML) without the core logic knowing the specific implementation.
+
+Abstract Factory
+Extends Factory Method by providing an interface for creating families of related objects without specifying their concrete classes. Useful in UI frameworks where you need consistent sets of widgets (buttons, checkboxes, dropdowns) across different operating systems or themes.
+
+Builder Pattern
+Separates the construction of a complex object from its representation. Particularly useful when an object requires many optional parameters. Instead of a constructor with dozens of arguments, the Builder pattern provides a fluent API:
+
+  new QueryBuilder()
+    .select("users")
+    .where("age > 18")
+    .orderBy("created_at", "DESC")
+    .limit(50)
+    .build()
+
+This makes code more readable and eliminates telescoping constructor anti-patterns.
+
+STRUCTURAL PATTERNS
+-------------------
+
+Adapter Pattern
+Converts the interface of a class into another interface that clients expect. Think of it as a translator between incompatible interfaces. When integrating a third-party payment library that expects a different data format than your internal order system, an Adapter class bridges the gap without modifying either system.
+
+Decorator Pattern
+Attaches additional responsibilities to an object dynamically. Decorators provide a flexible alternative to subclassing for extending functionality. HTTP middleware stacks are a classic example: each middleware wraps the next, adding authentication, logging, compression, or caching concerns without modifying the core handler.
+
+Facade Pattern
+Provides a simplified interface to a complex subsystem. A video conversion facade might hide the complexity of codec selection, file format handling, bitrate calculation, and thumbnail extraction behind a single convert(inputFile, outputFormat) method.
+
+Proxy Pattern
+Provides a surrogate or placeholder for another object to control access to it. Common uses include lazy initialization (virtual proxy), access control (protection proxy), logging, and caching (cache proxy). Modern JavaScript Proxy objects are a language-level implementation of this pattern.
+
+BEHAVIORAL PATTERNS
+-------------------
+
+Observer Pattern
+Defines a one-to-many dependency between objects so that when one object changes state, all its dependents are notified automatically. This is the foundation of event-driven programming, reactive frameworks, and publish-subscribe systems. Redux and React's context system are modern implementations.
+
+Strategy Pattern
+Defines a family of algorithms, encapsulates each one, and makes them interchangeable. The strategy lets the algorithm vary independently from clients that use it. A sorting component might accept different strategy objects (QuickSort, MergeSort, BubbleSort) and delegate to whichever is injected at runtime.
+
+Command Pattern
+Encapsulates a request as an object, allowing you to parameterize clients with queues, requests, and operations. Enables undo/redo functionality. Text editors use commands for every user action — each command knows how to execute and reverse itself.
+
+Iterator Pattern
+Provides a way to access elements of a collection sequentially without exposing its underlying representation. Modern languages build this into the language itself (for-of loops, generators in JavaScript, iterators in Python), but the pattern is foundational for custom data structures.
+
+SOLID PRINCIPLES
+----------------
+
+Single Responsibility Principle: A class should have only one reason to change. A UserService should handle user business logic; a UserRepository should handle persistence. Mixing them creates fragile, hard-to-test code.
+
+Open/Closed Principle: Software entities should be open for extension but closed for modification. Use abstractions and interfaces so new behavior can be added via new classes, not by editing existing ones.
+
+Liskov Substitution Principle: Subtypes must be substitutable for their base types without altering program correctness. If Square extends Rectangle but breaks invariants (setting width must not independently change height), it violates LSP.
+
+Interface Segregation Principle: Clients should not be forced to depend on interfaces they do not use. Split fat interfaces into smaller, role-specific ones.
+
+Dependency Inversion Principle: High-level modules should not depend on low-level modules; both should depend on abstractions. Inject dependencies rather than instantiating them directly — this is the foundation of modern dependency injection frameworks.
+
+WHEN TO USE PATTERNS
+--------------------
+
+Patterns solve specific problems in specific contexts. The most common mistake is pattern overuse — applying a pattern because it seems sophisticated, not because it solves a real problem. Before reaching for a pattern, identify the actual problem: Is there a need for a single instance? Is object creation logic complex? Are there multiple algorithms that need to be swappable?
+
+The best code is often the simplest code that correctly solves the problem. Patterns are tools, not goals.

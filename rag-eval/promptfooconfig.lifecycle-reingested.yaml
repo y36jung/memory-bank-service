@@ -1,0 +1,15 @@
+description: 'Memory Bank RAG eval — lifecycle: post-reingest freshness check'
+
+prompts:
+  - '{{query}}'
+
+providers:
+  - id: file://providers/memory-bank-provider.js
+    label: memory-bank-chat
+
+defaultTest:
+  options:
+    provider: memory-bank-chat
+
+tests:
+  - tests/lifecycle_reingested.yaml

@@ -1,0 +1,6 @@
+# Run only after scripts/lifecycle-eval.mjs has deleted packing_guides.csv.
+- vars:
+    query: 'What does packing_guides.csv say about what to pack for a backpacking trip through Southeast Asia?'
+  assert:
+    - type: llm-rubric
+      value: 'States that it has no record of this document/content rather than describing packing advice — the source document was deleted and must not be referenced.'

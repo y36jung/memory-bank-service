@@ -1,0 +1,139 @@
+API DESIGN PRINCIPLES FOR MODERN BACKEND SERVICES
+===================================================
+
+A well-designed API is the contract between your service and every client that depends on it. Getting it right matters enormously — once published, changing an API is costly. This guide covers the principles and practices that produce APIs that are intuitive, consistent, and maintainable over time.
+
+REST FUNDAMENTALS
+-----------------
+
+REST (Representational State Transfer) is an architectural style, not a protocol. The six constraints that define a RESTful system are: client-server separation, statelessness, cacheability, uniform interface, layered system, and optional code-on-demand.
+
+The uniform interface constraint is where most practical guidance comes from:
+
+Resource Identification: Everything is a resource with a unique URI. Use nouns, not verbs. The action is expressed by the HTTP method.
+  Good:   GET /users/42
+  Bad:    GET /getUser?id=42
+
+HTTP Method Semantics:
+  GET     — Read a resource. Must be safe and idempotent. No side effects.
+  POST    — Create a new resource or trigger a non-idempotent action.
+  PUT     — Replace a resource entirely (idempotent).
+  PATCH   — Partially update a resource.
+  DELETE  — Remove a resource (idempotent).
+
+Using methods correctly lets HTTP caches, proxies, and clients make safe assumptions about your API's behavior.
+
+HTTP STATUS CODES
+-----------------
+
+Status codes communicate the outcome of a request. Misusing them — returning 200 with an error body — breaks every HTTP-aware tool in the ecosystem.
+
+2xx — Success
+  200 OK              Standard success for GET, PUT, PATCH
+  201 Created         Resource was created; include Location header with new URI
+  204 No Content      Success with no response body (common for DELETE)
+
+4xx — Client Errors
+  400 Bad Request     Malformed request syntax or invalid parameters
+  401 Unauthorized    Missing or invalid authentication credentials
+  403 Forbidden       Authenticated but not authorized for this resource
+  404 Not Found       Resource does not exist
+  409 Conflict        Request conflicts with current state (e.g., duplicate create)
+  422 Unprocessable   Valid syntax but semantically invalid (validation errors)
+  429 Too Many Req.   Rate limit exceeded; include Retry-After header
+
+5xx — Server Errors
+  500 Internal Error  Unexpected server failure
+  502 Bad Gateway     Upstream service failure
+  503 Unavailable     Service overloaded or in maintenance; include Retry-After
+
+VERSIONING STRATEGIES
+---------------------
+
+APIs must evolve, but changes that break existing clients are unacceptable without a migration path. Three common approaches:
+
+URI Versioning: /v1/users, /v2/users
+  Pros: Explicit, easy to route, visible in logs and browser bookmarks.
+  Cons: Technically violates REST (same resource, different URI), pollutes the URL space.
+  Best for: Public APIs with long-lived clients.
+
+Header Versioning: Accept: application/vnd.myapi.v2+json
+  Pros: Clean URLs, semantically correct.
+  Cons: Invisible in browser, harder to test manually.
+  Best for: Internal APIs where clients are controlled.
+
+Query Parameter: /users?version=2
+  Pros: Easy to test in browser.
+  Cons: Query params are for filtering, not versioning. Caching becomes complex.
+  Best for: Avoiding this approach.
+
+Additive-only changes (new fields, new optional endpoints) should never require a version bump. Reserve versioning for breaking changes.
+
+AUTHENTICATION AND AUTHORIZATION
+---------------------------------
+
+Bearer Tokens (JWT): The most common pattern for stateless APIs. The client sends Authorization: Bearer <token> with each request. The server validates the token signature without hitting a database. JWTs contain claims (user ID, roles, expiry) encoded in the token itself.
+
+Key JWT security practices:
+- Use short expiry times (15 minutes to 1 hour) with refresh tokens for long sessions
+- Sign with RS256 (asymmetric) for services that only need to verify, not issue tokens
+- Never store sensitive data in JWT payload — it is base64-encoded, not encrypted
+- Validate: signature, expiry (exp), audience (aud), and issuer (iss)
+
+API Keys: Simpler than JWT. Suitable for server-to-server communication where a long-lived credential is acceptable. Should be generated cryptographically (UUID v4 or 32 random bytes), stored as a hash, and scoped to specific permissions.
+
+OAuth 2.0: The standard for delegated authorization. A user grants your API limited access to their data on another service (e.g., Google Drive). Do not implement OAuth from scratch — use a well-audited library.
+
+PAGINATION
+----------
+
+Never return unbounded collections. Three common pagination patterns:
+
+Offset Pagination: ?page=3&limit=20
+  Simple to implement and understand. Suffers from the "page drift" problem — if items are added or deleted between requests, pages shift and the client may see duplicates or miss items.
+
+Cursor Pagination: ?after=eyJpZCI6MjB9&limit=20
+  The cursor is an opaque token (usually base64-encoded ID or timestamp) pointing to a position in the dataset. Stable regardless of inserts or deletes. Required for real-time feeds. More complex to implement.
+
+Keyset Pagination: ?after_id=20&limit=20
+  Similar to cursor but the key is visible. Works well on indexed columns; degraded performance on non-indexed columns.
+
+Always include metadata in list responses: total count, next/previous cursor or page links.
+
+RATE LIMITING
+-------------
+
+Protect your API from abuse and ensure fair usage across clients. Return 429 with these headers:
+  X-RateLimit-Limit:      Maximum requests allowed in window
+  X-RateLimit-Remaining:  Requests remaining in current window
+  X-RateLimit-Reset:      Unix timestamp when window resets
+  Retry-After:            Seconds until the client may retry
+
+Algorithms:
+  Fixed Window: Simple but susceptible to burst at window boundaries
+  Sliding Window: More accurate, moderately complex
+  Token Bucket: Allows controlled bursts; most intuitive model
+  Leaky Bucket: Smooths traffic, enforces average rate
+
+ERROR RESPONSE FORMAT
+---------------------
+
+Consistent error responses make client-side error handling predictable. A minimal format:
+
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "Request validation failed",
+    "details": [
+      { "field": "email", "issue": "Must be a valid email address" },
+      { "field": "age",   "issue": "Must be a positive integer" }
+    ]
+  }
+}
+
+Use machine-readable error codes (not just HTTP status) so clients can branch on specific conditions programmatically.
+
+IDEMPOTENCY
+-----------
+
+Idempotency keys allow clients to safely retry requests without causing duplicate side effects. For POST requests that create resources or initiate payments, clients should send an Idempotency-Key header. The server stores the response for that key and returns the cached response for duplicate requests. Keys should expire after 24–48 hours. This is essential for any financial transaction API.

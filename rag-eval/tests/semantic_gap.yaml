@@ -1,0 +1,92 @@
+# Semantic gap: query shares little/no vocabulary with the source chunk.
+# Two-layer check per case:
+#   1. javascript assert — did retrieval actually surface the right chunk,
+#      checked via context.metadata.sources from the provider (documentName +
+#      a distinctive content substring from the expected passage), independent
+#      of whether the LLM's final answer happens to be correct anyway.
+#   2. llm-rubric — is the final answer actually correct.
+# A pass on (2) with a fail on (1) is the failure mode this file exists to catch:
+# the LLM papering over a bad retrieval with its own training knowledge.
+#
+# Content substrings are quoted verbatim from the fixture source files, not
+# from a chunkId/qdrantId — those regenerate on every clean-DB ingest, but the
+# chunker is deterministic over fixed source text, so the same passage always
+# lands in a chunk whose content contains this substring.
+
+- vars:
+    query: 'If I put money away in my 20s instead of my 30s, does it actually make a big difference by the time I retire?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'retirement_planning.md' &&
+          s.content?.includes('Alex invests $5,000/year from age 25 to 35')
+        );
+    - type: llm-rubric
+      value: 'States that starting earlier (even with a smaller total contribution) results in more money at retirement than starting later with a larger total contribution, due to compound interest — referencing something like the Alex/Jordan comparison.'
+
+- vars:
+    query: "Is there a point where my employer is basically giving me free money if I don't take it?"
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'retirement_planning.md' &&
+          s.content?.includes('Never leave an unmatched employer contribution on the table')
+        );
+    - type: llm-rubric
+      value: 'Explains employer 401(k) matching as free/guaranteed additional money that should not be left unclaimed.'
+
+- vars:
+    query: 'Why do I feel like garbage the day after only sleeping 6 hours instead of 8?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'sleep_and_recovery.md' &&
+          s.content?.includes('60–70% of total REM sleep')
+        );
+    - type: llm-rubric
+      value: 'Explains that REM sleep is concentrated in the final hours of the sleep period, so cutting sleep from 8 to 6 hours removes a disproportionate share (roughly 60-70%) of REM sleep, not just 25% of total sleep.'
+
+- vars:
+    query: "Why does coffee stop working as well after I've been drinking it all day, and then I crash?"
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'sleep_and_recovery.md' &&
+          s.content?.includes('Caffeine works by blocking adenosine receptors')
+        );
+    - type: llm-rubric
+      value: 'Explains caffeine blocks adenosine receptors rather than eliminating adenosine, and that accumulated adenosine binds once caffeine clears, causing a crash.'
+
+- vars:
+    query: "Why shouldn't my URL look like a function call?"
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'api_design_principles.txt' &&
+          s.content?.includes('Use nouns, not verbs')
+        );
+    - type: llm-rubric
+      value: 'Explains REST resource naming should use nouns identifying a resource (e.g. GET /users/42) rather than verb-style function-call URLs (e.g. GET /getUser?id=42).'
+
+- vars:
+    query: "What's wrong with saying everything worked when it actually failed?"
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s =>
+          s.documentName === 'api_design_principles.txt' &&
+          s.content?.includes('returning 200 with an error body')
+        );
+    - type: llm-rubric
+      value: 'Explains that returning a 200 status with an error body breaks HTTP-aware tooling/clients that rely on status codes to detect failure.'

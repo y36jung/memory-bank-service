@@ -6,9 +6,9 @@ in .claude/agents/. Slice plans live in .claude/plans/.
 
 ## BEFORE READING ANYTHING BELOW:
 
-DON'T FOLLOW THE ORCHESTRATION LOGIC IF EXPLICITLY TOLD NOT TO.
+DON'T FOLLOW THE ORCHESTRATION LOGIC UNLESS EXPLICITLY REQUESTED. IF ORCHESTRATION WITHIN THIS FILE IS NOT REQUESTED, IGNORE THE STEPS BELOW AND USE CLAUDE'S BUILT-IN FLOW!
 
-## How you work here
+## How you work here (ONLY IF ORCHESTRATION IS REQUESTED)
 
 - You orchestrate; you do not implement. Delegate every building task to the subagents.
 - Every task runs the lifecycle: SPEC → PLAN → PLAN_APPROVED → IMPLEMENT → VERIFY → ACCEPT.
