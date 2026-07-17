@@ -21,6 +21,11 @@
  * AC-IR-3: list_documents path skips batchEmbed (never called)
  * AC-IR-4: list_documents with date filters applies date predicates
  * AC-IR-5: list_documents with null filters returns all documents (no date conditions)
+ * AC-BACKOFF-1: primary threshold tier has hits → lowConfidence: false
+ * AC-BACKOFF-2: only a lower tier has hits → those chunks returned, lowConfidence: true
+ * AC-BACKOFF-3: even the floor tier has no hits → chunks: [], lowConfidence: false
+ * AC-BACKOFF-4: searchPoints is called exactly once, always at the floor threshold —
+ *               backoff tiers are applied in process, not via re-querying Qdrant
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -397,22 +402,25 @@ describe('retrieveChunks', () => {
     expect(result[0]?.documentName).toBe('my-important-document.pdf');
   });
 
-  it('passes a widened candidate pool (topK * 3, min 20) and scoreThreshold to searchPoints', async () => {
+  it('passes a widened candidate pool (topK * 3, min 20) to searchPoints, queried at the backoff floor', async () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     await retrieveChunks(TEST_USER_ID, 'query', 5, 0.7);
 
     // candidatePoolSize = max(5*3, 20) = 20 — over-fetched for the reranker.
-    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 20, 0.7);
+    // Qdrant is always queried at the 0.05 floor threshold, not the passed-in
+    // scoreThreshold (0.7 here) — tiers between floor and primary are applied
+    // in process against that single result set (see AC-BACKOFF-4).
+    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 20, 0.05);
   });
 
-  it('uses defaults topK=10 and scoreThreshold=0.4, widening the candidate pool to 30', async () => {
+  it('uses defaults topK=10, widening the candidate pool to 30, queried at the backoff floor', async () => {
     vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
 
     await retrieveChunks(TEST_USER_ID, 'query');
 
     // candidatePoolSize = max(10*3, 20) = 30.
-    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 30, 0.4);
+    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 30, 0.05);
   });
 
   it('calls rerank() with the raw query and the final topK as truncation size', async () => {
@@ -691,5 +699,83 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
     if (result.type === 'document_list') {
       expect(result.documents).toHaveLength(2);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-BACKOFF: score-threshold backoff on the vector chain
+// ---------------------------------------------------------------------------
+
+describe('AC-BACKOFF: retrieve() — score-threshold backoff', () => {
+  const backoffDbRow = {
+    id: 'chunk-pg-id-1',
+    qdrantId: 'qdrant-uuid-1',
+    documentId: 'doc-id-1',
+    content: 'chunk content',
+    originalName: 'doc.txt',
+    createdAt: new Date(),
+    sourceType: 'upload',
+    mimeType: 'text/plain',
+    sizeBytes: null,
+    startSecs: null,
+    endSecs: null,
+  };
+
+  it('AC-BACKOFF-1: a hit at/above the primary tier (0.2) returns lowConfidence: false', async () => {
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-1', score: 0.9 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([backoffDbRow]) as unknown as ReturnType<typeof db.select>,
+    );
+
+    const result = await retrieve(TEST_USER_ID, 'query');
+
+    expect(result.type).toBe('chunk_results');
+    if (result.type === 'chunk_results') {
+      expect(result.lowConfidence).toBe(false);
+      expect(result.chunks).toHaveLength(1);
+    }
+  });
+
+  it('AC-BACKOFF-2: no hit clears 0.2 but one clears the 0.1 tier → returned with lowConfidence: true', async () => {
+    // 0.12 is below the primary tier (0.2) but clears the next tier (0.1).
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-1', score: 0.12 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([backoffDbRow]) as unknown as ReturnType<typeof db.select>,
+    );
+
+    const result = await retrieve(TEST_USER_ID, 'query');
+
+    expect(result.type).toBe('chunk_results');
+    if (result.type === 'chunk_results') {
+      expect(result.lowConfidence).toBe(true);
+      expect(result.chunks).toHaveLength(1);
+      expect(result.chunks[0]?.qdrantId).toBe('qdrant-uuid-1');
+    }
+  });
+
+  it('AC-BACKOFF-3: nothing clears even the floor tier → empty chunks, lowConfidence: false', async () => {
+    // Qdrant is queried at the floor threshold, so an empty result here means
+    // nothing exists even at the widest tier.
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([]);
+
+    const result = await retrieve(TEST_USER_ID, 'query');
+
+    expect(result.type).toBe('chunk_results');
+    if (result.type === 'chunk_results') {
+      expect(result.chunks).toEqual([]);
+      expect(result.lowConfidence).toBe(false);
+    }
+  });
+
+  it('AC-BACKOFF-4: searchPoints is called exactly once even when backoff is needed', async () => {
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-1', score: 0.06 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([backoffDbRow]) as unknown as ReturnType<typeof db.select>,
+    );
+
+    await retrieve(TEST_USER_ID, 'query');
+
+    expect(qdrant.searchPoints).toHaveBeenCalledTimes(1);
+    expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 30, 0.05);
   });
 });
