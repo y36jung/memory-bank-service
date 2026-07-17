@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import type { FastifyReply } from 'fastify';
 import { db } from '../db/index.js';
 import { messages, chatSessions } from '../db/schema.js';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, or, ne, sql } from 'drizzle-orm';
 import { retrieve, type RetrievedChunk, type RetrievedDocument } from './retrieval.js';
 import { classifyHistoryScope, type HistoryScope } from './queryClassifier.js';
 import { env } from '../config/env.js';
@@ -55,7 +55,33 @@ const SYSTEM_PROMPT =
   '- Cite the source document name when referencing specific information.\n' +
   '- If the context is relevant but does not fully answer the question exactly, answer as best you can using the most closely related information in the documents — treat broader or adjacent facts as a fallback. Do not highlight what is missing; just answer from what is available. Never supplement with general knowledge.\n' +
   '- If the context contains no relevant information at all, say "I don\'t know based on the provided documents."\n' +
-  '- Do not hallucinate or add information not present in the context.';
+  '- Do not hallucinate or add information not present in the context.\n' +
+  '- If anything in the conversation history conflicts with the context documents provided for this message, trust the context documents — they are freshly retrieved and authoritative, while prior conversation turns are not guaranteed to be accurate.';
+
+/**
+ * Instruction appended to the system prompt when retrieval only found chunks
+ * by backing off below its primary score threshold (RetrievalResult.lowConfidence).
+ * Steers the model toward hedging instead of answering as confidently as it
+ * would on a normal, high-confidence retrieval.
+ */
+const LOW_CONFIDENCE_INSTRUCTION =
+  '\n\nNote: the context above only cleared a relaxed relevance threshold — it may not closely match ' +
+  "the question. If it doesn't clearly answer the question, say so explicitly and ask the user to " +
+  'clarify or confirm relevance, rather than answering confidently.';
+
+/**
+ * Deterministic, app-authored reply used when retrieval finds no chunks at
+ * all (even after the score-threshold backoff in retrieval.ts). Sent
+ * directly instead of asking GPT-4o to generate a refusal, so an ungrounded
+ * completion is never a possibility for this case — and because the text is
+ * known-trustworthy, loadHistory() (below) exempts it from the
+ * empty-sources history filter, unlike a model-authored "I don't know."
+ *
+ * Exported so the integration suite can assert against the exact text
+ * loadHistory()'s SQL predicate matches on, rather than duplicating it.
+ */
+export const NO_RELEVANT_DOCS_MESSAGE =
+  "I couldn't find any relevant documents for that question. Could you rephrase, or upload something related?";
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -130,8 +156,35 @@ function buildDocumentListContext(docs: RetrievedDocument[]): string {
  * an unbounded or large-count fetch can't blow past MAX_HISTORY_TOKENS. Rows
  * are fetched newest-first so truncation drops the oldest messages when over
  * budget, then reversed to chronological order for the completion request.
+ *
+ * Assistant rows with no retrieved sources are excluded at the query level
+ * (not after fetching): an ungrounded reply is the likeliest place a
+ * hallucination entered the conversation, and replaying it verbatim would
+ * let the model treat it as established fact in later turns. Filtering in
+ * SQL — rather than fetching `limit` rows and filtering in JS — means a
+ * dropped row doesn't cost history depth: `LIMIT` applies to the
+ * already-grounded row set, so 'recent'/'count' scopes backfill from older
+ * grounded messages instead of silently returning fewer than `limit` rows.
+ * User rows are always kept — `sources` is an assistant-only signal, never
+ * populated on user messages, and a NULL/empty sources column excludes the
+ * row (`jsonb_array_length` of NULL is NULL, which is falsy in SQL).
+ *
+ * One exemption: NO_RELEVANT_DOCS_MESSAGE also has empty `sources` (retrieval
+ * genuinely found nothing), but unlike a model-authored empty-context reply
+ * it is app-authored and therefore known-trustworthy — dropping it would
+ * strip the only assistant turn between two user turns, leaving a follow-up
+ * like "can you expand on that?" with no antecedent in the model's context
+ * even though the user still sees the reply in the transcript. It's kept in
+ * history so the model can correctly respond to that follow-up instead of
+ * silently losing the thread. The empty-sources filter remains a safety net
+ * for the residual case: a model reply that ignores the "say I don't know"
+ * instruction over a genuinely empty context.
+ *
+ * Exported (not just used internally) so the integration suite can verify
+ * this SQL predicate against a real Postgres — the unit-test suite mocks
+ * `db` entirely and can't exercise real WHERE-clause evaluation.
  */
-async function loadHistory(sessionId: string, historyScope: HistoryScope) {
+export async function loadHistory(sessionId: string, historyScope: HistoryScope) {
   const limit =
     historyScope.mode === 'recent'
       ? HISTORY_DEPTH
@@ -142,7 +195,16 @@ async function loadHistory(sessionId: string, historyScope: HistoryScope) {
   const baseQuery = db
     .select({ role: messages.role, content: messages.content })
     .from(messages)
-    .where(eq(messages.sessionId, sessionId))
+    .where(
+      and(
+        eq(messages.sessionId, sessionId),
+        or(
+          ne(messages.role, 'assistant'),
+          sql`jsonb_array_length(${messages.sources}) > 0`,
+          eq(messages.content, NO_RELEVANT_DOCS_MESSAGE),
+        ),
+      ),
+    )
     .orderBy(desc(messages.createdAt));
 
   const rows = limit !== undefined ? await baseQuery.limit(limit) : await baseQuery;
@@ -169,7 +231,11 @@ async function loadHistory(sessionId: string, historyScope: HistoryScope) {
  *  1. Validates the session exists.
  *  2. Retrieves relevant chunks or document list from the store.
  *  3. Persists the user message.
- *  4. Streams a GPT-4o response via SSE.
+ *  3b. If retrieval found zero chunks, short-circuits with
+ *      NO_RELEVANT_DOCS_MESSAGE — no GPT-4o call.
+ *  4. Streams a GPT-4o response via SSE (context flagged as low-confidence
+ *     when retrieval only cleared the score-threshold backoff, not the
+ *     primary threshold).
  *  5. Persists the assistant message with sources on stream completion.
  *
  * The caller (api-transport route) must NOT write to `reply` after this
@@ -205,9 +271,40 @@ export async function streamChatResponse(
     content: userMessage,
   });
 
+  // ── Step 3b: Zero-chunk short-circuit ─────────────────────────────────────
+  // Retrieval (including its own score-threshold backoff) found nothing at
+  // all. Skip the GPT-4o call entirely rather than trust a freeform refusal —
+  // see NO_RELEVANT_DOCS_MESSAGE for why. No streaming loop: emit the canned
+  // text as a single delta, then done, matching the normal SSE shape below.
+  if (retrievalResult.type === 'chunk_results' && retrievalResult.chunks.length === 0) {
+    let messageId = '';
+    try {
+      const [inserted] = await db
+        .insert(messages)
+        .values({
+          sessionId,
+          role: 'assistant',
+          content: NO_RELEVANT_DOCS_MESSAGE,
+          sources: [] as unknown as Record<string, unknown>[],
+        })
+        .returning({ id: messages.id });
+      messageId = inserted?.id ?? '';
+    } catch (dbErr) {
+      console.error('Failed to persist assistant message:', dbErr);
+    }
+
+    reply.raw.write(
+      `data: ${JSON.stringify({ type: 'delta', content: NO_RELEVANT_DOCS_MESSAGE })}\n\n`,
+    );
+    reply.raw.write(`data: ${JSON.stringify({ type: 'done', messageId, sources: [] })}\n\n`);
+    reply.raw.end();
+    return;
+  }
+
   // ── Step 4: Build context string ──────────────────────────────────────────
   let contextString: string;
   let sources: Source[];
+  let lowConfidence = false;
 
   if (retrievalResult.type === 'document_list') {
     contextString = buildDocumentListContext(retrievalResult.documents);
@@ -225,10 +322,14 @@ export async function streamChatResponse(
       pageNumber: c.pageNumber,
       content: c.content,
     }));
+    lowConfidence = retrievalResult.lowConfidence;
   }
 
-  const systemContent =
+  let systemContent =
     contextString.length > 0 ? `${SYSTEM_PROMPT}\n\n${contextString}` : SYSTEM_PROMPT;
+  if (lowConfidence) {
+    systemContent += LOW_CONFIDENCE_INSTRUCTION;
+  }
 
   // ── Step 5: Load chat history per the classified scope ────────────────────
   const historyRows = await loadHistory(sessionId, historyScope);
@@ -294,6 +395,8 @@ export async function streamChatResponse(
     messageId = '';
   }
 
-  reply.raw.write(`data: ${JSON.stringify({ type: 'done', messageId, sources })}\n\n`);
+  reply.raw.write(
+    `data: ${JSON.stringify({ type: 'done', messageId, sources, uncertain: lowConfidence })}\n\n`,
+  );
   reply.raw.end();
 }

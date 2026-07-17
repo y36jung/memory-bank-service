@@ -285,7 +285,11 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
 3. Search Qdrant
    collection: 'memory_bank'
    top_k: max(final_top_k * 3, 20)  — over-fetched candidate pool for reranking (step 5)
-   score_threshold: 0.4  (configurable)
+   score_threshold: 0.2 (primary, configurable) with backoff to a 0.05 floor —
+     queried once at the floor threshold; 0.2 → 0.1 → 0.05 are then applied
+     in process against that single sorted result set (no extra round trips),
+     stopping at the first tier with any hits. Results are marked
+     low-confidence when a tier below the primary threshold was needed.
    with_payload: false   (Qdrant returns only vector IDs and scores — no content)
 
 4. Fetch chunk text from Postgres
@@ -303,9 +307,16 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
    Trim to fit within GPT-4o's context window (leaving room for system prompt + response)
    Token counting via `tiktoken`
 
-7. GPT-4o chat completion (streaming)
+7. GPT-4o chat completion (streaming) — skipped entirely if retrieval (step 3)
+   found zero chunks even after backoff: the app sends a fixed, deterministic
+   "no relevant documents" reply instead of asking the model to generate a
+   refusal, so an ungrounded completion is never possible for that case.
+   Otherwise:
    System prompt: instructs the model to answer from context only,
-                  cite sources, and say "I don't know" when context is insufficient
+                  cite sources, and say "I don't know" when context is insufficient.
+                  When step 3 only cleared the backoff floor (low-confidence),
+                  an extra instruction tells the model to hedge and ask the
+                  user to clarify instead of answering confidently.
    Messages: [system, ...chat history, user]
    History depth is dynamic, classified per-query from the current session only
    (never cross-session): 'recent' (last 6, the default) | 'full_session'
@@ -313,6 +324,11 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
    number) | an explicit count extracted from the query text itself (e.g.
    "last 7 messages" → 7; never a guessed number). Capped by a token budget
    that drops the oldest messages first if exceeded.
+   History also excludes assistant turns with empty `sources` (a likely
+   hallucination, since retrieval attaches real sources whenever it finds
+   anything) so a bad turn isn't replayed as fact — except the fixed
+   "no relevant documents" reply above, which is exempted since it's
+   app-authored and therefore trustworthy regardless of empty sources.
 
 8. Stream SSE response to client
    As tokens arrive from OpenAI, forward them as SSE events
@@ -409,8 +425,12 @@ event: delta
 data: {"token": "answer is..."}
 
 event: done
-data: {"messageId": "...", "sources": [{"documentName": "...", "chunkIndex": 0, "score": 0.87}]}
+data: {"messageId": "...", "sources": [{"documentName": "...", "chunkIndex": 0, "score": 0.87}], "uncertain": false}
 ```
+
+`uncertain: true` marks a response whose retrieval only cleared the
+score-threshold backoff floor, not the primary threshold (Query Pipeline
+step 3) — a signal that the sources may be a weak match for the question.
 
 OAuth endpoints have been removed for now — see [Future Additions](#future-additions) for the deferred API surface.
 
