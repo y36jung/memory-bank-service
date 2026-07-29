@@ -1,4 +1,7 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { eq } from 'drizzle-orm';
+import { db } from '../../db/index.js';
+import { users } from '../../db/schema.js';
 import { rotateRefreshToken } from '../../db/refreshTokens.js';
 import {
   REFRESH_COOKIE_NAME,
@@ -13,7 +16,7 @@ import { env } from '../../config/env.js';
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'lax' as const,
-  secure: env.NODE_ENV === 'production',
+  secure: env.NODE_ENV === 'beta',
   path: '/api/auth',
   maxAge: REFRESH_TOKEN_TTL_MS / 1000, // @fastify/cookie maxAge is seconds
 };
@@ -35,7 +38,15 @@ export const refreshRoute: FastifyPluginAsyncZod = async (app) => {
 
     switch (result.status) {
       case 'rotated': {
-        const accessToken = app.jwt.sign({ sub: result.userId }, { expiresIn: '15m' });
+        const [user] = await db
+          .select({ isDemo: users.isDemo })
+          .from(users)
+          .where(eq(users.id, result.userId))
+          .limit(1);
+        const accessToken = app.jwt.sign(
+          { sub: result.userId, isDemo: user?.isDemo ?? false },
+          { expiresIn: '15m' },
+        );
         reply.setCookie(REFRESH_COOKIE_NAME, newRaw, REFRESH_COOKIE_OPTIONS);
         sendSuccess(reply, { accessToken });
         break;

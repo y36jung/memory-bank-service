@@ -22,7 +22,6 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 const ADMIN_URL = 'postgresql://memory_bank:dev-password@localhost:5432/postgres';
 const LEGACY_USER_ID = '00000000-0000-0000-0000-000000000001';
-const LEGACY_USER_EMAIL = 'legacy@memory-bank.local';
 
 async function createDb(name: string) {
   const admin = new Pool({ connectionString: ADMIN_URL });
@@ -65,13 +64,11 @@ describe('migration 0005_add_users_table — fresh database', () => {
     await dropDb(DB_NAME);
   });
 
-  it('creates the users table with the legacy row', async () => {
+  it('creates the users table; the legacy row it seeds is removed by a later migration (0008_remove-legacy-user)', async () => {
     const pool = new Pool({ connectionString: dbUrl(DB_NAME) });
     const { rows } = await pool.query('SELECT id, email FROM users');
     await pool.end();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].id).toBe(LEGACY_USER_ID);
-    expect(rows[0].email).toBe(LEGACY_USER_EMAIL);
+    expect(rows).toHaveLength(0);
   });
 
   it('makes documents.user_id and chat_sessions.user_id NOT NULL', async () => {

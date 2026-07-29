@@ -8,7 +8,7 @@
  * tests/unit/setup.ts pins NODE_ENV=test for this whole unit suite, so the
  * plain top-of-file import already exercises the default/test-env branch.
  * `CORS_ALLOWED_ORIGINS` is computed once at module load from `env.NODE_ENV`
- * (plan §8 edge case #7), so the development and production branches are
+ * (plan §8 edge case #7), so the development and beta branches are
  * unreachable via a normal static import — they are reached below via
  * `vi.resetModules()` + an overridden `process.env.NODE_ENV` + a dynamic
  * re-import of the module (and, transitively, of src/config/env.ts).
@@ -19,6 +19,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { CORS_ALLOWED_ORIGINS, isAllowedOrigin } from '../../../src/config/cors.js';
 
 const ORIGINAL_NODE_ENV = process.env['NODE_ENV'];
+const ORIGINAL_REGISTRATION_SECRET = process.env['REGISTRATION_SECRET'];
 
 describe('src/config/cors.ts', () => {
   // Suite-isolation guard (plan §5.5): every test that mutates
@@ -26,6 +27,11 @@ describe('src/config/cors.ts', () => {
   // afterward, whether or not the test also did so itself.
   afterEach(() => {
     process.env['NODE_ENV'] = ORIGINAL_NODE_ENV;
+    if (ORIGINAL_REGISTRATION_SECRET === undefined) {
+      delete process.env['REGISTRATION_SECRET'];
+    } else {
+      process.env['REGISTRATION_SECRET'] = ORIGINAL_REGISTRATION_SECRET;
+    }
     vi.resetModules();
   });
 
@@ -77,38 +83,43 @@ describe('src/config/cors.ts', () => {
     });
   });
 
-  describe('production env (module reloaded under NODE_ENV=production)', () => {
+  describe('beta env (module reloaded under NODE_ENV=beta)', () => {
     it('CORS_ALLOWED_ORIGINS resolves to the deployed frontend only', async () => {
       vi.resetModules();
-      process.env['NODE_ENV'] = 'production';
+      process.env['NODE_ENV'] = 'beta';
+      process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
       expect(mod.CORS_ALLOWED_ORIGINS).toEqual(['https://memory-bank-ui.vercel.app']);
     });
 
     it('isAllowedOrigin returns true for the deployed frontend origin', async () => {
       vi.resetModules();
-      process.env['NODE_ENV'] = 'production';
+      process.env['NODE_ENV'] = 'beta';
+      process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
       expect(mod.isAllowedOrigin('https://memory-bank-ui.vercel.app')).toBe(true);
     });
 
     it('isAllowedOrigin returns false for the dev frontend origin', async () => {
       vi.resetModules();
-      process.env['NODE_ENV'] = 'production';
+      process.env['NODE_ENV'] = 'beta';
+      process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
       expect(mod.isAllowedOrigin('http://localhost:3001')).toBe(false);
     });
 
     it('isAllowedOrigin returns false for an arbitrary untrusted origin (regression guard)', async () => {
       vi.resetModules();
-      process.env['NODE_ENV'] = 'production';
+      process.env['NODE_ENV'] = 'beta';
+      process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
       expect(mod.isAllowedOrigin('https://evil.example')).toBe(false);
     });
 
     it('isAllowedOrigin returns false for a missing Origin (undefined)', async () => {
       vi.resetModules();
-      process.env['NODE_ENV'] = 'production';
+      process.env['NODE_ENV'] = 'beta';
+      process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
       expect(mod.isAllowedOrigin(undefined)).toBe(false);
     });

@@ -376,12 +376,28 @@ POST /auth/logout     (no body; reads the refresh_token cookie)
      server-side and clears the cookie
 ```
 
-Access tokens are JWTs (`{ sub: userId }`, HS256, 15-minute TTL, signed with the existing
-`JWT_SECRET`). Refresh tokens are opaque random values delivered only via an httpOnly
-cookie (30-day TTL); the server stores only their SHA-256 hash, never the raw value, and
-rotates them on every `/auth/refresh` call. Each rotation links parent → child, so replaying
-an already-used refresh token revokes the entire family (all descendants), forcing
+Access tokens are JWTs (`{ sub: userId, isDemo: boolean }`, HS256, 15-minute TTL, signed
+with the existing `JWT_SECRET`). Refresh tokens are opaque random values delivered only via
+an httpOnly cookie (30-day TTL); the server stores only their SHA-256 hash, never the raw
+value, and rotates them on every `/auth/refresh` call. Each rotation links parent → child, so
+replaying an already-used refresh token revokes the entire family (all descendants), forcing
 re-authentication of that compromised session.
+
+**Beta access control:**
+
+Public self-registration is disabled while `NODE_ENV=beta`: `POST /auth/register` requires
+an `x-registration-secret` header matching `REGISTRATION_SECRET`, so only the operator can
+mint accounts (via the Bruno collection under `bruno/`). Outside beta (development/test),
+registration is unrestricted, unchanged from before.
+
+`users.is_demo` marks the single shared demo account used by anonymous visitors. Its
+permissions are a strict allow-list, enforced via `assertNotDemo()` (`src/lib/permissions.ts`)
+at the top of each restricted handler:
+
+- Blocked (403 `FORBIDDEN`): `POST /documents/upload`, `DELETE /documents/:id`,
+  `POST /documents/:id/retry`, `DELETE /auth/me`.
+- Allowed: full chat access (create/rename/delete sessions, send messages) and read-only
+  document access (`GET /documents`, `GET /documents/:id`, `GET /documents/:id/file`).
 
 ### Documents
 

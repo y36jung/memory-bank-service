@@ -8,6 +8,7 @@ import { deleteObject } from '../../services/storage.js';
 import { deletePoints } from '../../services/qdrant.js';
 import { ingestionQueue } from '../../queue/index.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
+import { assertNotDemo } from '../../lib/permissions.js';
 import { randomUUID } from 'node:crypto';
 
 export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -88,6 +89,8 @@ export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: { params: z.object({ id: z.string().uuid() }) },
     },
     async (request, reply) => {
+      assertNotDemo(request);
+
       const [doc] = await db
         .select()
         .from(documents)
@@ -128,6 +131,8 @@ export const documentListRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: { params: z.object({ id: z.string().uuid() }) },
     },
     async (request, reply) => {
+      assertNotDemo(request);
+
       const [doc] = await db
         .select()
         .from(documents)

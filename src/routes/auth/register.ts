@@ -1,5 +1,6 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
+import { timingSafeEqual } from 'node:crypto';
 import { db } from '../../db/index.js';
 import { users } from '../../db/schema.js';
 import { insertRootRefreshToken } from '../../db/refreshTokens.js';
@@ -17,7 +18,7 @@ import { env } from '../../config/env.js';
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'lax' as const,
-  secure: env.NODE_ENV === 'production',
+  secure: env.NODE_ENV === 'beta',
   path: '/api/auth',
   maxAge: REFRESH_TOKEN_TTL_MS / 1000, // @fastify/cookie maxAge is seconds
 };
@@ -44,10 +45,24 @@ export const registerRoute: FastifyPluginAsyncZod = async (app) => {
         body: z.object({
           email: z.string().email(),
           password: z.string().min(8),
+          isDemo: z.boolean().optional().default(false),
         }),
       },
     },
     async (request, reply) => {
+      // Public self-registration is disabled during the beta — only whoever holds
+      // REGISTRATION_SECRET (the operator) can mint accounts here.
+      if (env.NODE_ENV === 'beta') {
+        const provided = request.headers['x-registration-secret'];
+        const providedBuf = Buffer.from(typeof provided === 'string' ? provided : '');
+        const expectedBuf = Buffer.from(env.REGISTRATION_SECRET ?? '');
+        const matches =
+          providedBuf.length === expectedBuf.length && timingSafeEqual(providedBuf, expectedBuf);
+        if (!matches) {
+          throw new AppError('FORBIDDEN', 'Registration is invite-only during the beta', 403);
+        }
+      }
+
       const email = request.body.email.trim().toLowerCase();
       const passwordHash = await hashPassword(request.body.password);
 
@@ -55,7 +70,7 @@ export const registerRoute: FastifyPluginAsyncZod = async (app) => {
       try {
         const [row] = await db
           .insert(users)
-          .values({ email, passwordHash })
+          .values({ email, passwordHash, isDemo: request.body.isDemo })
           .returning({ id: users.id, email: users.email });
         if (!row) throw new Error('register: insert returned no row');
         user = row;
@@ -66,7 +81,10 @@ export const registerRoute: FastifyPluginAsyncZod = async (app) => {
         throw err;
       }
 
-      const accessToken = app.jwt.sign({ sub: user.id }, { expiresIn: '15m' });
+      const accessToken = app.jwt.sign(
+        { sub: user.id, isDemo: request.body.isDemo },
+        { expiresIn: '15m' },
+      );
 
       const raw = generateRefreshToken();
       await insertRootRefreshToken({

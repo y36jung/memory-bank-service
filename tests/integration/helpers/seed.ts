@@ -16,11 +16,11 @@ import { generateRefreshToken, hashRefreshToken } from '../../../src/lib/refresh
  * bcrypt hashing (src/lib/password.ts) so the seeded row can log in through
  * POST /api/auth/login exactly like a registered user.
  */
-export async function seedUser(emailPrefix: string, password?: string) {
+export async function seedUser(emailPrefix: string, password?: string, isDemo = false) {
   const passwordHash = password === undefined ? undefined : await hashPassword(password);
   const [user] = await db
     .insert(users)
-    .values({ email: `${emailPrefix}-${randomUUID()}@test.local`, passwordHash })
+    .values({ email: `${emailPrefix}-${randomUUID()}@test.local`, passwordHash, isDemo })
     .returning();
   if (!user) throw new Error('seedUser: insert returned no row');
   return user;
