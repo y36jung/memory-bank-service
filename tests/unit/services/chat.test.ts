@@ -18,6 +18,13 @@
  * AC-HS-3: 'count' scope queries with LIMIT = the extracted count
  * AC-HS-4: history over MAX_HISTORY_TOKENS is truncated, dropping the oldest
  *          messages first (most-recent-preserved)
+ *
+ * NOT covered here: the anti-hallucination-compounding guard (excluding
+ * assistant messages with no retrieved sources) lives in loadHistory()'s SQL
+ * WHERE clause, not in JS — this suite mocks `db` entirely and its `where()`
+ * stub is a pass-through, so it cannot exercise real predicate evaluation.
+ * See tests/integration/chat-history-grounding.test.ts (real Postgres) for
+ * that behavior, including the LIMIT-applies-after-filtering fix.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -99,7 +106,35 @@ function makeSessionOkChain() {
   };
 }
 
-function setupHappyPath(historyRows: { role: string; content: string }[], scope: HistoryScope) {
+// A single non-empty, normal-confidence chunk — used by setupHappyPath so
+// the zero-chunk short-circuit (which these history-focused tests don't
+// exercise) never kicks in. See the dedicated short-circuit / low-confidence
+// describe blocks below for those paths.
+const MOCK_CHUNK = {
+  chunkId: 'chunk-1',
+  qdrantId: 'qdrant-1',
+  documentId: 'doc-1',
+  documentName: 'doc.txt',
+  content: 'chunk content',
+  score: 0.9,
+  createdAt: new Date(),
+  sourceType: 'upload',
+  mimeType: 'text/plain',
+  sizeBytes: null,
+  pageNumber: null,
+  startSecs: null,
+  endSecs: null,
+};
+
+function setupHappyPath(
+  historyRows: { role: string; content: string }[],
+  scope: HistoryScope,
+  retrievalResult: Awaited<ReturnType<typeof retrievalModule.retrieve>> = {
+    type: 'chunk_results',
+    chunks: [MOCK_CHUNK],
+    lowConfidence: false,
+  },
+) {
   const { chain: historyChain, limitMock } = makeHistoryChain(historyRows);
 
   let callCount = 0;
@@ -111,14 +146,25 @@ function setupHappyPath(historyRows: { role: string; content: string }[], scope:
     return historyChain as unknown as ReturnType<typeof db.select>;
   });
 
-  vi.mocked(retrievalModule.retrieve).mockResolvedValue({ type: 'chunk_results', chunks: [] });
+  vi.mocked(retrievalModule.retrieve).mockResolvedValue(retrievalResult);
   vi.mocked(queryClassifierModule.classifyHistoryScope).mockResolvedValue(scope);
+  const valuesMock = vi
+    .fn()
+    .mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: 'msg-1' }]) });
   vi.mocked(db.insert).mockReturnValue({
-    values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: 'msg-1' }]) }),
+    values: valuesMock,
   } as unknown as ReturnType<typeof db.insert>);
   mockChatCreate.mockResolvedValue((async function* () {})());
 
-  return { limitMock };
+  return { limitMock, valuesMock };
+}
+
+/** Parses the `data: {...}\n\n` SSE frames written to reply.raw.write into objects. */
+function sseEventsWritten(reply: FastifyReply): Record<string, unknown>[] {
+  return vi.mocked(reply.raw.write).mock.calls.map(([data]) => {
+    const json = (data as string).replace(/^data: /, '').replace(/\n\n$/, '');
+    return JSON.parse(json) as Record<string, unknown>;
+  });
 }
 
 function historyMessagesSentToOpenAI(): { role: string; content: string }[] {
@@ -254,5 +300,94 @@ describe('AC-HS-4: history over MAX_HISTORY_TOKENS is truncated, most-recent-pre
     // #8 is oldest and must have been dropped).
     expect(sentHistory[sentHistory.length - 1]?.content).toContain('#0');
     expect(sentHistory.some((m) => m.content.includes('#8'))).toBe(false);
+  });
+});
+
+describe('AC-ZERO: zero-chunk short-circuit (no relevant documents found)', () => {
+  it('skips the OpenAI call and persists/emits the canned message when retrieval finds zero chunks', async () => {
+    const { valuesMock } = setupHappyPath(
+      [],
+      { mode: 'recent' },
+      {
+        type: 'chunk_results',
+        chunks: [],
+        lowConfidence: false,
+      },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'something unrelated', reply);
+
+    expect(mockChatCreate).not.toHaveBeenCalled();
+
+    const events = sseEventsWritten(reply);
+    expect(events).toHaveLength(2);
+    expect(events[0]?.['type']).toBe('delta');
+    expect(events[0]?.['content']).toContain("couldn't find any relevant documents");
+    expect(events[1]).toMatchObject({ type: 'done', messageId: 'msg-1', sources: [] });
+    expect(reply.raw.end).toHaveBeenCalled();
+
+    // Persisted assistant message (the last db.insert().values() call) carries
+    // the canned content and empty sources, not model output.
+    const insertedValues = valuesMock.mock.calls.at(-1)?.[0] as {
+      role: string;
+      content: string;
+      sources: unknown[];
+    };
+    expect(insertedValues.role).toBe('assistant');
+    expect(insertedValues.content).toContain("couldn't find any relevant documents");
+    expect(insertedValues.sources).toEqual([]);
+  });
+});
+
+describe('AC-LOWCONF: low-confidence retrieval (score-threshold backoff) hedging', () => {
+  it('appends the hedge instruction to the system prompt and marks the done event uncertain: true', async () => {
+    setupHappyPath(
+      [],
+      { mode: 'recent' },
+      {
+        type: 'chunk_results',
+        chunks: [MOCK_CHUNK],
+        lowConfidence: true,
+      },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'weakly matching query', reply);
+
+    const callArgs = mockChatCreate.mock.calls[0]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    const systemMessage = callArgs.messages[0];
+    expect(systemMessage?.content).toContain('relaxed relevance threshold');
+
+    const events = sseEventsWritten(reply);
+    const doneEvent = events.find((e) => e['type'] === 'done');
+    expect(doneEvent).toMatchObject({ uncertain: true });
+  });
+
+  it('does not append the hedge instruction or set uncertain when retrieval is normal-confidence', async () => {
+    setupHappyPath(
+      [],
+      { mode: 'recent' },
+      {
+        type: 'chunk_results',
+        chunks: [MOCK_CHUNK],
+        lowConfidence: false,
+      },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'clearly matching query', reply);
+
+    const callArgs = mockChatCreate.mock.calls[0]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    const systemMessage = callArgs.messages[0];
+    expect(systemMessage?.content).not.toContain('relaxed relevance threshold');
+
+    const events = sseEventsWritten(reply);
+    const doneEvent = events.find((e) => e['type'] === 'done');
+    expect(doneEvent).toMatchObject({ uncertain: false });
   });
 });

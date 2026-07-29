@@ -39,7 +39,7 @@ export interface RetrievedDocument {
 
 export type RetrievalResult =
   | { type: 'document_list'; documents: RetrievedDocument[] }
-  | { type: 'chunk_results'; chunks: RetrievedChunk[] };
+  | { type: 'chunk_results'; chunks: RetrievedChunk[]; lowConfidence: boolean };
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -51,6 +51,26 @@ const METADATA_WEIGHT = 0.5;
 // between, not just the final result count.
 const RERANK_CANDIDATE_MULTIPLIER = 3;
 const MIN_RERANK_CANDIDATE_POOL = 20;
+
+// Floor for the score-threshold backoff below. Qdrant is queried once at this
+// (lowest-acceptable) threshold; the primary threshold and any backoff tiers
+// in between are then applied in process against that single result set, so
+// backing off never costs an extra round trip.
+const SCORE_FLOOR = 0.05;
+
+/**
+ * Builds a descending list of score thresholds from `primary` down to
+ * `floor`, halving each step — e.g. buildScoreTiers(0.2, 0.05) => [0.2, 0.1, 0.05].
+ */
+function buildScoreTiers(primary: number, floor: number): number[] {
+  const tiers = [primary];
+  let current = primary;
+  while (current > floor) {
+    current = Math.max(current / 2, floor);
+    tiers.push(current);
+  }
+  return tiers;
+}
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -234,7 +254,7 @@ export async function retrieve(
   userId: string,
   query: string,
   topK = 10,
-  scoreThreshold = 0.4,
+  scoreThreshold = 0.2,
 ): Promise<RetrievalResult> {
   const currentDate = new Date().toISOString().split('T')[0] as string;
 
@@ -256,13 +276,31 @@ export async function retrieve(
 
   // Vector chain and metadata SQL are independent once classification + hydeText are ready.
   const [vectorChunksOrNull, sqlChunks] = await Promise.all([
-    // Vector chain: embed → Qdrant → Postgres hydration.
-    (async (): Promise<RetrievedChunk[] | null> => {
+    // Vector chain: embed → Qdrant (at the backoff floor) → tier selection → Postgres hydration.
+    (async (): Promise<{ chunks: RetrievedChunk[]; lowConfidence: boolean } | null> => {
       const [vector] = await batchEmbed([hydeText]);
       if (vector === undefined) return null;
 
-      const qdrantResults = await searchPoints(userId, vector, candidatePoolSize, scoreThreshold);
-      if (qdrantResults.length === 0) return [];
+      // Query once at the widest threshold we'd ever accept — Qdrant already
+      // returns results sorted by score, so the tiers below are applied
+      // in process against this single result set instead of re-querying.
+      const floorResults = await searchPoints(userId, vector, candidatePoolSize, SCORE_FLOOR);
+      if (floorResults.length === 0) return { chunks: [], lowConfidence: false };
+
+      const tiers = buildScoreTiers(scoreThreshold, SCORE_FLOOR);
+      let qdrantResults: typeof floorResults = [];
+      let usedTier = SCORE_FLOOR;
+      for (const tier of tiers) {
+        const atTier = floorResults.filter((r) => r.score >= tier);
+        if (atTier.length > 0) {
+          qdrantResults = atTier;
+          usedTier = tier;
+          break;
+        }
+      }
+      if (qdrantResults.length === 0) return { chunks: [], lowConfidence: false };
+
+      const lowConfidence = usedTier < scoreThreshold;
 
       const qdrantIds = qdrantResults.map((r) => r.id);
       const scoreByQdrantId = new Map(qdrantResults.map((r) => [r.id, r.score]));
@@ -286,7 +324,7 @@ export async function retrieve(
         .innerJoin(documents, eq(chunks.documentId, documents.id))
         .where(and(inArray(chunks.qdrantId, qdrantIds), eq(documents.userId, userId)));
 
-      return rows
+      const hydrated = rows
         .map((row): RetrievedChunk | null => {
           const contentScore = scoreByQdrantId.get(row.qdrantId);
           if (contentScore === undefined) return null;
@@ -307,6 +345,8 @@ export async function retrieve(
           };
         })
         .filter((c): c is RetrievedChunk => c !== null);
+
+      return { chunks: hydrated, lowConfidence };
     })(),
     // Metadata SQL path: resolves to [] immediately if no classification/filters.
     classification?.filters
@@ -314,8 +354,10 @@ export async function retrieve(
       : Promise.resolve([] as RetrievedChunk[]),
   ]);
 
-  if (vectorChunksOrNull === null) return { type: 'chunk_results', chunks: [] };
-  const vectorChunks = vectorChunksOrNull;
+  if (vectorChunksOrNull === null) {
+    return { type: 'chunk_results', chunks: [], lowConfidence: false };
+  }
+  const { chunks: vectorChunks, lowConfidence } = vectorChunksOrNull;
 
   // If no metadata filters, candidates are the vector results as-is (order
   // doesn't matter — rerank() below re-sorts).
@@ -349,12 +391,14 @@ export async function retrieve(
       .slice(0, candidatePoolSize);
   }
 
-  if (candidates.length === 0) return { type: 'chunk_results', chunks: [] };
+  if (candidates.length === 0) {
+    return { type: 'chunk_results', chunks: [], lowConfidence: false };
+  }
 
   // Final step: rerank the candidate pool with the local cross-encoder and
   // truncate to topK. Reranks against the raw query, not the HyDE text.
   const rerankedChunks = await rerank(query, candidates, topK);
-  return { type: 'chunk_results', chunks: rerankedChunks };
+  return { type: 'chunk_results', chunks: rerankedChunks, lowConfidence };
 }
 
 /**
@@ -366,7 +410,7 @@ export async function retrieveChunks(
   userId: string,
   query: string,
   topK = 10,
-  scoreThreshold = 0.4,
+  scoreThreshold = 0.2,
 ): Promise<RetrievedChunk[]> {
   const result = await retrieve(userId, query, topK, scoreThreshold);
   return result.type === 'chunk_results' ? result.chunks : [];
