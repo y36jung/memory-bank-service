@@ -78,11 +78,18 @@ describe('src/config/cors.ts', () => {
   });
 
   describe('production env (module reloaded under NODE_ENV=production)', () => {
-    it('CORS_ALLOWED_ORIGINS resolves to an empty list', async () => {
+    it('CORS_ALLOWED_ORIGINS resolves to the deployed frontend only', async () => {
       vi.resetModules();
       process.env['NODE_ENV'] = 'production';
       const mod = await import('../../../src/config/cors.js');
-      expect(mod.CORS_ALLOWED_ORIGINS).toEqual([]);
+      expect(mod.CORS_ALLOWED_ORIGINS).toEqual(['https://memory-bank-ui.vercel.app']);
+    });
+
+    it('isAllowedOrigin returns true for the deployed frontend origin', async () => {
+      vi.resetModules();
+      process.env['NODE_ENV'] = 'production';
+      const mod = await import('../../../src/config/cors.js');
+      expect(mod.isAllowedOrigin('https://memory-bank-ui.vercel.app')).toBe(true);
     });
 
     it('isAllowedOrigin returns false for the dev frontend origin', async () => {
