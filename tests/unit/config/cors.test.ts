@@ -84,12 +84,15 @@ describe('src/config/cors.ts', () => {
   });
 
   describe('beta env (module reloaded under NODE_ENV=beta)', () => {
-    it('CORS_ALLOWED_ORIGINS resolves to the deployed frontend only', async () => {
+    it('CORS_ALLOWED_ORIGINS resolves to the deployed frontend and the local dev frontend', async () => {
       vi.resetModules();
       process.env['NODE_ENV'] = 'beta';
       process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
-      expect(mod.CORS_ALLOWED_ORIGINS).toEqual(['https://memory-bank-ui.vercel.app']);
+      expect(mod.CORS_ALLOWED_ORIGINS).toEqual([
+        'https://memory-bank-ui.vercel.app',
+        'http://localhost:3001',
+      ]);
     });
 
     it('isAllowedOrigin returns true for the deployed frontend origin', async () => {
@@ -100,12 +103,12 @@ describe('src/config/cors.ts', () => {
       expect(mod.isAllowedOrigin('https://memory-bank-ui.vercel.app')).toBe(true);
     });
 
-    it('isAllowedOrigin returns false for the dev frontend origin', async () => {
+    it('isAllowedOrigin returns true for the local dev frontend origin (lets local frontend test against the deployed beta API)', async () => {
       vi.resetModules();
       process.env['NODE_ENV'] = 'beta';
       process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
-      expect(mod.isAllowedOrigin('http://localhost:3001')).toBe(false);
+      expect(mod.isAllowedOrigin('http://localhost:3001')).toBe(true);
     });
 
     it('isAllowedOrigin returns false for an arbitrary untrusted origin (regression guard)', async () => {
