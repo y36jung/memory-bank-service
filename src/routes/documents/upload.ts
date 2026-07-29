@@ -4,10 +4,13 @@ import { documents, ingestionJobs } from '../../db/schema.js';
 import { uploadStream, buildDocumentStorageKey } from '../../services/storage.js';
 import { ingestionQueue } from '../../queue/index.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
+import { assertNotDemo } from '../../lib/permissions.js';
 import { randomUUID } from 'node:crypto';
 
 export const documentUploadRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post('/documents/upload', async (request, reply) => {
+    assertNotDemo(request);
+
     const data = await request.file();
     if (!data) throw new AppError('NO_FILE', 'No file uploaded', 400);
 

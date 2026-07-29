@@ -50,6 +50,20 @@
       "when": 1783383400978,
       "tag": "0006_dapper_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785360156481,
+      "tag": "0007_loving_spacker_dave",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785361426797,
+      "tag": "0008_remove-legacy-user",
+      "breakpoints": true
     }
   ]
 }

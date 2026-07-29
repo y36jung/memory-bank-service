@@ -6,10 +6,13 @@ import { deletePointsByUserId } from '../../services/qdrant.js';
 import { deleteObjectsByPrefix } from '../../services/storage.js';
 import { REFRESH_COOKIE_NAME } from '../../lib/refreshToken.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
+import { assertNotDemo } from '../../lib/permissions.js';
 
 export const accountRoutes: FastifyPluginAsyncZod = async (app) => {
   // DELETE /auth/me — delete the caller's account: Qdrant → Postgres cascade → S3.
   app.delete('/auth/me', async (request, reply) => {
+    assertNotDemo(request);
+
     const userId = request.user.id;
 
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);

@@ -7,8 +7,8 @@ import { env } from '../config/env.js';
 // protected scope (verify) share the same `app.jwt` decorator.
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string }; // types BOTH app.jwt.sign(...) and request.jwtVerify()
-    user: { id: string };
+    payload: { sub: string; isDemo: boolean }; // types BOTH app.jwt.sign(...) and request.jwtVerify()
+    user: { id: string; isDemo: boolean };
   }
 }
 
@@ -16,6 +16,6 @@ export const jwtPlugin = fp(async (app) => {
   await app.register(fastifyJwt, {
     secret: env.JWT_SECRET,
     verify: { algorithms: ['HS256'] },
-    formatUser: (payload) => ({ id: payload.sub }),
+    formatUser: (payload) => ({ id: payload.sub, isDemo: payload.isDemo }),
   });
 });

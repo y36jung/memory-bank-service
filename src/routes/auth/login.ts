@@ -19,7 +19,7 @@ import { env } from '../../config/env.js';
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'lax' as const,
-  secure: env.NODE_ENV === 'production',
+  secure: env.NODE_ENV === 'beta',
   path: '/api/auth',
   maxAge: REFRESH_TOKEN_TTL_MS / 1000, // @fastify/cookie maxAge is seconds
 };
@@ -77,7 +77,7 @@ export const loginRoute: FastifyPluginAsyncZod = async (app) => {
         throw new AppError('INVALID_CREDENTIALS', 'Invalid email or password', 401);
       }
 
-      const accessToken = app.jwt.sign({ sub: user.id }, { expiresIn: '15m' });
+      const accessToken = app.jwt.sign({ sub: user.id, isDemo: user.isDemo }, { expiresIn: '15m' });
 
       const raw = generateRefreshToken();
       await insertRootRefreshToken({

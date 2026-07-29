@@ -35,6 +35,7 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash'), // null ⇒ user cannot log in (synthetic/legacy)
+  isDemo: boolean('is_demo').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
