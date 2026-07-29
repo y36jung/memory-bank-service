@@ -2,13 +2,19 @@ import { env } from './env.js';
 
 /**
  * Single source of truth for the CORS allow-list.
- * Development trusts only the local frontend; test and production allow no
- * cross-origin access (empty list) — identical to the @fastify/cors `origin`
- * posture in src/server.ts. Consumed by src/server.ts, the SSE chat-messages
- * route, and the integration test app.
+ * Development trusts only the local frontend; production trusts only the
+ * deployed frontend; test allows no cross-origin access (empty list), so
+ * the isolated unit/integration suites never depend on a real deployed
+ * origin — identical to the @fastify/cors `origin` posture in src/server.ts.
+ * Consumed by src/server.ts, the SSE chat-messages route, and the
+ * integration test app.
  */
 export const CORS_ALLOWED_ORIGINS: readonly string[] =
-  env.NODE_ENV === 'development' ? ['http://localhost:3001'] : [];
+  env.NODE_ENV === 'development'
+    ? ['http://localhost:3001']
+    : env.NODE_ENV === 'production'
+      ? ['https://memory-bank-ui.vercel.app']
+      : [];
 
 /**
  * True only when `origin` is present AND an exact-match member of the
