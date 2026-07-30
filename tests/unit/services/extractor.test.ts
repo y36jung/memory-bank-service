@@ -251,6 +251,43 @@ describe('extractText — MIME type dispatch', () => {
     expect(result.text).toBe(expected);
   });
 
+  it('handles text/html by stripping tags via cheerio', async () => {
+    const html = '<html><body><p>Hello</p><p>World</p></body></html>';
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(stringToReadable(html))
+      .mockResolvedValueOnce(stringToReadable(html));
+
+    const result = await extractText('some/key.html', 'text/html');
+    expect(result.text).toContain('Hello');
+    expect(result.text).toContain('World');
+    expect(result.text).not.toMatch(/<[a-z]+>/i);
+    expect(result.resolvedMimeType).toBe('text/html');
+  });
+
+  it('reclassifies application/octet-stream as text/html when the bytes look like HTML', async () => {
+    // file-type can't detect HTML by magic bytes, so client-supplied
+    // application/octet-stream survives as the fallback resolvedMime unless
+    // the content sniff in extractText recognizes the leading <!doctype html>.
+    const html = '<!DOCTYPE html><html><body><p>Sniffed</p></body></html>';
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(stringToReadable(html))
+      .mockResolvedValueOnce(stringToReadable(html));
+
+    const result = await extractText('some/key.bin', 'application/octet-stream');
+    expect(result.resolvedMimeType).toBe('text/html');
+    expect(result.text).toContain('Sniffed');
+  });
+
+  it('does NOT reclassify application/octet-stream when the bytes do not look like HTML', async () => {
+    vi.mocked(storage.getStream)
+      .mockResolvedValueOnce(stringToReadable('just some binary-ish text'))
+      .mockResolvedValueOnce(stringToReadable('just some binary-ish text'));
+
+    await expect(extractText('some/key.bin', 'application/octet-stream')).rejects.toMatchObject({
+      code: 'UNSUPPORTED_FORMAT',
+    });
+  });
+
   it('handles application/pdf by parsing the buffer', async () => {
     // Verify dispatch reaches the PDF branch — an invalid PDF throws a non-UNSUPPORTED_FORMAT error
     const invalidPdfBuffer = Buffer.from('not a pdf');

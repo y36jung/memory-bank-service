@@ -1,9 +1,10 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
 import { and, eq } from 'drizzle-orm';
+import sanitizeHtml from 'sanitize-html';
 import { db } from '../../db/index.js';
 import { documents } from '../../db/schema.js';
-import { getStreamWithLength } from '../../services/storage.js';
+import { getStreamWithLength, getObjectBuffer } from '../../services/storage.js';
 import { AppError } from '../../lib/errors.js';
 
 export const documentFileRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -22,6 +23,19 @@ export const documentFileRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!doc) throw new AppError('NOT_FOUND', 'Document not found', 404);
       if (!doc.storageKey)
         throw new AppError('NOT_READY', 'Document has not been ingested yet', 409);
+
+      // HTML can carry <script>; sanitize before serving inline since this app
+      // has no CSP/helmet to contain a stored-XSS from an uploaded file.
+      if (doc.mimeType === 'text/html') {
+        const buf = await getObjectBuffer(doc.storageKey);
+        if (!buf) throw new AppError('S3_NOT_FOUND', 'Object not found', 404);
+        const sanitized = sanitizeHtml(buf.toString('utf-8'));
+
+        reply.header('Content-Type', 'text/html; charset=utf-8');
+        reply.header('Content-Disposition', `inline; filename="${doc.originalName}"`);
+        reply.header('Content-Security-Policy', "script-src 'none'");
+        return reply.send(sanitized);
+      }
 
       const { stream, contentLength } = await getStreamWithLength(doc.storageKey);
 

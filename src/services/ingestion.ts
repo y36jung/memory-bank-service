@@ -201,7 +201,11 @@ export async function processIngestionJob(job: Job<IngestionJobPayload>): Promis
       );
       await tx
         .update(documents)
-        .set({ status: 'indexed', updatedAt: new Date() })
+        .set({
+          status: 'indexed',
+          mimeType: extraction.resolvedMimeType,
+          updatedAt: new Date(),
+        })
         .where(eq(documents.id, documentId));
       await tx
         .update(ingestionJobs)

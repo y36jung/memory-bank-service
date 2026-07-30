@@ -259,18 +259,19 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
 
 ### Extractor Map
 
-| MIME type / format  | Extractor                                            |
-| ------------------- | ---------------------------------------------------- |
-| `text/plain`, `.md` | Direct string read                                   |
-| `application/pdf`   | `pdf-parse`                                          |
-| `.docx`             | `mammoth`                                            |
-| `.xlsx`, `.csv`     | `xlsx` / `csv-parse`                                 |
-| `image/*`           | GPT-4o Vision (Milestone 2)                          |
-| `audio/*`           | Whisper API (Milestone 2)                            |
-| `video/*`           | ffmpeg frame extraction + Whisper (Milestone 2)      |
-| Gmail message       | HTML-to-text via `@mozilla/readability` or `cheerio` |
-| Google Doc / Slide  | Google Drive export API → PDF or plain text          |
-| Outlook message     | Microsoft Graph API `.body.content`                  |
+| MIME type / format   | Extractor                                            |
+| -------------------- | ---------------------------------------------------- |
+| `text/plain`, `.md`  | Direct string read                                   |
+| `text/html`, `.html` | `cheerio` — strip tags, keep block-level text        |
+| `application/pdf`    | `pdf-parse`                                          |
+| `.docx`              | `mammoth`                                            |
+| `.xlsx`, `.csv`      | `xlsx` / `csv-parse`                                 |
+| `image/*`            | GPT-4o Vision (Milestone 2)                          |
+| `audio/*`            | Whisper API (Milestone 2)                            |
+| `video/*`            | ffmpeg frame extraction + Whisper (Milestone 2)      |
+| Gmail message        | HTML-to-text via `@mozilla/readability` or `cheerio` |
+| Google Doc / Slide   | Google Drive export API → PDF or plain text          |
+| Outlook message      | Microsoft Graph API `.body.content`                  |
 
 ---
 
