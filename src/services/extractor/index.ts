@@ -9,6 +9,7 @@ import { extractSpreadsheet } from './spreadsheet.js';
 import { extractImage } from './image.js';
 import { extractAudio } from './audio.js';
 import { extractVideo } from './video.js';
+import { extractHtml } from './html.js';
 import type { TranscribedSegment } from './audio.js';
 
 // ---------------------------------------------------------------------------
@@ -19,6 +20,7 @@ export const SUPPORTED_MIME_TYPES = {
   // M1 — text formats
   TEXT_PLAIN: 'text/plain',
   TEXT_MARKDOWN: 'text/markdown',
+  TEXT_HTML: 'text/html',
   APPLICATION_PDF: 'application/pdf',
   APPLICATION_DOCX: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   TEXT_CSV: 'text/csv',
@@ -52,6 +54,9 @@ export interface ExtractionResult {
   pages?: string[]; // only populated for PDFs — one string per page
 }
 
+/** extractText's return type: an ExtractionResult plus the MIME type it dispatched on. */
+export type ExtractResult = ExtractionResult & { resolvedMimeType: string };
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -77,6 +82,17 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+/**
+ * Best-effort sniff for HTML content in a buffer that carries a generic
+ * `application/octet-stream` MIME type. `file-type`'s magic-byte detection
+ * can never identify HTML (it has no binary signature), so this is the only
+ * way to recognize an HTML upload that a client mislabeled as octet-stream.
+ */
+function looksLikeHtml(buf: Buffer): boolean {
+  const head = buf.subarray(0, 512).toString('utf-8').replace(/^[\s﻿]+/, '');
+  return /^(<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>])/i.test(head);
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -95,7 +111,7 @@ export async function extractText(
   key: string,
   mimeType: string,
   opts?: ExtractOptions,
-): Promise<ExtractionResult> {
+): Promise<ExtractResult> {
   // Step 1: size pre-check
   const sizeBytes = await storage.headObject(key);
   if (sizeBytes !== null && sizeBytes > env.MAX_FILE_SIZE_BYTES) {
@@ -119,18 +135,25 @@ export async function extractText(
   headerStream.destroy();
   const headerBuf = Buffer.from(Buffer.concat(headerChunks).subarray(0, 4100));
   const detected = await fileTypeFromBuffer(headerBuf);
-  const resolvedMime = detected?.mime ?? normaliseMimeType(mimeType);
+  let resolvedMime = detected?.mime ?? normaliseMimeType(mimeType);
+
+  // file-type can't detect HTML by magic bytes (it has none); fall back to a
+  // content sniff when the client sent (or file-type inferred) a generic type.
+  if (resolvedMime === 'application/octet-stream' && looksLikeHtml(headerBuf)) {
+    resolvedMime = SUPPORTED_MIME_TYPES.TEXT_HTML;
+  }
 
   // Step 3: dispatch
   if (resolvedMime.startsWith('image/')) {
-    return { text: await extractImage(key, opts) };
+    return { text: await extractImage(key, opts), resolvedMimeType: resolvedMime };
   }
   if (resolvedMime.startsWith('audio/')) {
     const r = await extractAudio(key, opts);
-    return { text: r.text, segments: r.segments };
+    return { text: r.text, segments: r.segments, resolvedMimeType: resolvedMime };
   }
   if (resolvedMime.startsWith('video/')) {
-    return extractVideo(key, opts);
+    const r = await extractVideo(key, opts);
+    return { ...r, resolvedMimeType: resolvedMime };
   }
 
   // M1 text-based formats: get fresh stream
@@ -139,23 +162,28 @@ export async function extractText(
   switch (resolvedMime) {
     case SUPPORTED_MIME_TYPES.TEXT_PLAIN:
     case SUPPORTED_MIME_TYPES.TEXT_MARKDOWN:
-      return { text: await streamToUtf8String(stream) };
+      return { text: await streamToUtf8String(stream), resolvedMimeType: resolvedMime };
+
+    case SUPPORTED_MIME_TYPES.TEXT_HTML: {
+      const buf = await streamToBuffer(stream);
+      return { text: extractHtml(buf), resolvedMimeType: resolvedMime };
+    }
 
     case SUPPORTED_MIME_TYPES.APPLICATION_PDF: {
       const buf = await streamToBuffer(stream);
       const pageTexts = await extractPdfPages(buf);
-      return { text: pageTexts.join('\n\n'), pages: pageTexts };
+      return { text: pageTexts.join('\n\n'), pages: pageTexts, resolvedMimeType: resolvedMime };
     }
 
     case SUPPORTED_MIME_TYPES.APPLICATION_DOCX: {
       const buf = await streamToBuffer(stream);
-      return { text: await extractDocx(buf) };
+      return { text: await extractDocx(buf), resolvedMimeType: resolvedMime };
     }
 
     case SUPPORTED_MIME_TYPES.TEXT_CSV:
     case SUPPORTED_MIME_TYPES.APPLICATION_XLSX: {
       const buf = await streamToBuffer(stream);
-      return { text: await extractSpreadsheet(buf, resolvedMime) };
+      return { text: await extractSpreadsheet(buf, resolvedMime), resolvedMimeType: resolvedMime };
     }
 
     default:
