@@ -89,7 +89,10 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
  * way to recognize an HTML upload that a client mislabeled as octet-stream.
  */
 function looksLikeHtml(buf: Buffer): boolean {
-  const head = buf.subarray(0, 512).toString('utf-8').replace(/^[\s﻿]+/, '');
+  const head = buf
+    .subarray(0, 512)
+    .toString('utf-8')
+    .replace(/^[\s﻿]+/, '');
   return /^(<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>])/i.test(head);
 }
 
