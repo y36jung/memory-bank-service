@@ -7,6 +7,7 @@ import { eq, inArray, and, gte, lte, asc, desc, sql } from 'drizzle-orm';
 import { type MetadataFilters, classifyQuery } from './queryClassifier.js';
 import { rerank } from './reranker.js';
 import { env } from '../config/env.js';
+import { timed } from '../lib/timing.js';
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
@@ -260,8 +261,8 @@ export async function retrieve(
 
   // classifyQuery and HyDE both need only the query string — run in parallel.
   const [classification, hydeText] = await Promise.all([
-    classifyQuery(query, currentDate),
-    generateHypotheticalAnswer(query),
+    timed('classifyQuery', () => classifyQuery(query, currentDate)),
+    timed('generateHypotheticalAnswer (HyDE)', () => generateHypotheticalAnswer(query)),
   ]);
 
   // list_documents path: skip vector search, query documents table directly.
@@ -277,81 +278,93 @@ export async function retrieve(
   // Vector chain and metadata SQL are independent once classification + hydeText are ready.
   const [vectorChunksOrNull, sqlChunks] = await Promise.all([
     // Vector chain: embed → Qdrant (at the backoff floor) → tier selection → Postgres hydration.
-    (async (): Promise<{ chunks: RetrievedChunk[]; lowConfidence: boolean } | null> => {
-      const [vector] = await batchEmbed([hydeText]);
-      if (vector === undefined) return null;
+    timed(
+      'vectorChain total',
+      async (): Promise<{
+        chunks: RetrievedChunk[];
+        lowConfidence: boolean;
+      } | null> => {
+        const [vector] = await timed('batchEmbed', () => batchEmbed([hydeText]));
+        if (vector === undefined) return null;
 
-      // Query once at the widest threshold we'd ever accept — Qdrant already
-      // returns results sorted by score, so the tiers below are applied
-      // in process against this single result set instead of re-querying.
-      const floorResults = await searchPoints(userId, vector, candidatePoolSize, SCORE_FLOOR);
-      if (floorResults.length === 0) return { chunks: [], lowConfidence: false };
+        // Query once at the widest threshold we'd ever accept — Qdrant already
+        // returns results sorted by score, so the tiers below are applied
+        // in process against this single result set instead of re-querying.
+        const floorResults = await timed('qdrant searchPoints', () =>
+          searchPoints(userId, vector, candidatePoolSize, SCORE_FLOOR),
+        );
+        if (floorResults.length === 0) return { chunks: [], lowConfidence: false };
 
-      const tiers = buildScoreTiers(scoreThreshold, SCORE_FLOOR);
-      let qdrantResults: typeof floorResults = [];
-      let usedTier = SCORE_FLOOR;
-      for (const tier of tiers) {
-        const atTier = floorResults.filter((r) => r.score >= tier);
-        if (atTier.length > 0) {
-          qdrantResults = atTier;
-          usedTier = tier;
-          break;
+        const tiers = buildScoreTiers(scoreThreshold, SCORE_FLOOR);
+        let qdrantResults: typeof floorResults = [];
+        let usedTier = SCORE_FLOOR;
+        for (const tier of tiers) {
+          const atTier = floorResults.filter((r) => r.score >= tier);
+          if (atTier.length > 0) {
+            qdrantResults = atTier;
+            usedTier = tier;
+            break;
+          }
         }
-      }
-      if (qdrantResults.length === 0) return { chunks: [], lowConfidence: false };
+        if (qdrantResults.length === 0) return { chunks: [], lowConfidence: false };
 
-      const lowConfidence = usedTier < scoreThreshold;
+        const lowConfidence = usedTier < scoreThreshold;
 
-      const qdrantIds = qdrantResults.map((r) => r.id);
-      const scoreByQdrantId = new Map(qdrantResults.map((r) => [r.id, r.score]));
+        const qdrantIds = qdrantResults.map((r) => r.id);
+        const scoreByQdrantId = new Map(qdrantResults.map((r) => [r.id, r.score]));
 
-      const rows = await db
-        .select({
-          id: chunks.id,
-          qdrantId: chunks.qdrantId,
-          documentId: chunks.documentId,
-          content: chunks.content,
-          originalName: documents.originalName,
-          createdAt: documents.createdAt,
-          sourceType: documents.sourceType,
-          mimeType: documents.mimeType,
-          sizeBytes: documents.sizeBytes,
-          pageNumber: chunks.pageNumber,
-          startSecs: chunks.startSecs,
-          endSecs: chunks.endSecs,
-        })
-        .from(chunks)
-        .innerJoin(documents, eq(chunks.documentId, documents.id))
-        .where(and(inArray(chunks.qdrantId, qdrantIds), eq(documents.userId, userId)));
+        const rows = await timed('postgres hydrate chunks', () =>
+          db
+            .select({
+              id: chunks.id,
+              qdrantId: chunks.qdrantId,
+              documentId: chunks.documentId,
+              content: chunks.content,
+              originalName: documents.originalName,
+              createdAt: documents.createdAt,
+              sourceType: documents.sourceType,
+              mimeType: documents.mimeType,
+              sizeBytes: documents.sizeBytes,
+              pageNumber: chunks.pageNumber,
+              startSecs: chunks.startSecs,
+              endSecs: chunks.endSecs,
+            })
+            .from(chunks)
+            .innerJoin(documents, eq(chunks.documentId, documents.id))
+            .where(and(inArray(chunks.qdrantId, qdrantIds), eq(documents.userId, userId))),
+        );
 
-      const hydrated = rows
-        .map((row): RetrievedChunk | null => {
-          const contentScore = scoreByQdrantId.get(row.qdrantId);
-          if (contentScore === undefined) return null;
-          return {
-            chunkId: row.id,
-            qdrantId: row.qdrantId,
-            documentId: row.documentId,
-            documentName: row.originalName,
-            content: row.content,
-            score: contentScore,
-            createdAt: row.createdAt,
-            sourceType: row.sourceType,
-            mimeType: row.mimeType,
-            sizeBytes: row.sizeBytes ?? null,
-            pageNumber: row.pageNumber ?? null,
-            startSecs: row.startSecs ?? null,
-            endSecs: row.endSecs ?? null,
-          };
-        })
-        .filter((c): c is RetrievedChunk => c !== null);
+        const hydrated = rows
+          .map((row): RetrievedChunk | null => {
+            const contentScore = scoreByQdrantId.get(row.qdrantId);
+            if (contentScore === undefined) return null;
+            return {
+              chunkId: row.id,
+              qdrantId: row.qdrantId,
+              documentId: row.documentId,
+              documentName: row.originalName,
+              content: row.content,
+              score: contentScore,
+              createdAt: row.createdAt,
+              sourceType: row.sourceType,
+              mimeType: row.mimeType,
+              sizeBytes: row.sizeBytes ?? null,
+              pageNumber: row.pageNumber ?? null,
+              startSecs: row.startSecs ?? null,
+              endSecs: row.endSecs ?? null,
+            };
+          })
+          .filter((c): c is RetrievedChunk => c !== null);
 
-      return { chunks: hydrated, lowConfidence };
-    })(),
+        return { chunks: hydrated, lowConfidence };
+      },
+    ),
     // Metadata SQL path: resolves to [] immediately if no classification/filters.
-    classification?.filters
-      ? retrieveByMetadata(userId, classification.filters, candidatePoolSize)
-      : Promise.resolve([] as RetrievedChunk[]),
+    timed('retrieveByMetadata (sqlChunks)', () =>
+      classification?.filters
+        ? retrieveByMetadata(userId, classification.filters, candidatePoolSize)
+        : Promise.resolve([] as RetrievedChunk[]),
+    ),
   ]);
 
   if (vectorChunksOrNull === null) {
@@ -397,7 +410,7 @@ export async function retrieve(
 
   // Final step: rerank the candidate pool with the local cross-encoder and
   // truncate to topK. Reranks against the raw query, not the HyDE text.
-  const rerankedChunks = await rerank(query, candidates, topK);
+  const rerankedChunks = await timed('rerank total', () => rerank(query, candidates, topK));
   return { type: 'chunk_results', chunks: rerankedChunks, lowConfidence };
 }
 

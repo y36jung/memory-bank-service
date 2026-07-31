@@ -1,5 +1,6 @@
 import { AutoModelForSequenceClassification, AutoTokenizer } from '@xenova/transformers';
 import type { RetrievedChunk } from './retrieval.js';
+import { timed } from '../lib/timing.js';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -57,13 +58,19 @@ export async function rerank(
 ): Promise<RetrievedChunk[]> {
   if (chunks.length === 0) return [];
 
-  const crossEncoder = await loadCrossEncoder();
+  const isFirstLoad = crossEncoderPromise === null;
+  const crossEncoder = await timed(
+    isFirstLoad ? 'rerank: loadCrossEncoder (cold, one-time)' : 'rerank: loadCrossEncoder (warm)',
+    () => loadCrossEncoder(),
+  );
 
-  const scored = await Promise.all(
-    chunks.map(async (chunk) => ({
-      chunk,
-      rerankScore: await scorePair(crossEncoder, query, chunk.content),
-    })),
+  const scored = await timed(`rerank: score ${chunks.length} candidates`, () =>
+    Promise.all(
+      chunks.map(async (chunk) => ({
+        chunk,
+        rerankScore: await scorePair(crossEncoder, query, chunk.content),
+      })),
+    ),
   );
 
   return scored
