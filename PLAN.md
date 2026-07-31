@@ -10,22 +10,23 @@ Email (Gmail, Outlook) and cloud file (Google Drive, OneDrive) ingestion via OAu
 
 ## Tech Stack Decisions
 
-| Concern             | Choice                        | Rationale                                                                                                              |
-| ------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Runtime             | Node.js + TypeScript          | Specified; strong async I/O for streaming LLM responses                                                                |
-| Framework           | Fastify                       | Faster than Express, native JSON schema validation, built-in plugin system, first-class TypeScript support             |
-| ORM                 | Drizzle                       | Schema-first with typed migrations, excellent TypeScript inference, lighter than Prisma, pairs naturally with Postgres |
-| Primary DB          | PostgreSQL                    | Stores documents, chunks metadata, chat history, job state                                                             |
-| Vector Store        | Qdrant                        | Dedicated ANN search; payload storage means chunk text lives alongside vectors for fast retrieval                      |
-| Object Storage      | AWS S3                        | Raw file storage; presigned URLs for uploads                                                                           |
-| Job Queue           | BullMQ + Redis                | Durable async ingestion queue; supports retries, priority, and concurrency limits                                      |
-| LLM                 | OpenAI GPT-4o                 | Chat completions with streaming (SSE)                                                                                  |
-| Embeddings          | OpenAI text-embedding-3-large | 3072-dim, best retrieval quality in the OpenAI lineup                                                                  |
-| Audio Transcription | OpenAI Whisper                | Milestone 2                                                                                                            |
-| Vision / OCR        | OpenAI GPT-4o Vision          | Milestone 2                                                                                                            |
-| Validation          | Zod                           | Runtime schema validation; integrated with Fastify via `fastify-type-provider-zod`                                     |
-| Config              | `dotenv` + `zod` env schema   | Fails fast on missing env vars at startup                                                                              |
-| Testing             | Vitest                        | Fast, ESM-native, great TypeScript support                                                                             |
+| Concern             | Choice                        | Rationale                                                                                                                                                                         |
+| ------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime             | Node.js + TypeScript          | Specified; strong async I/O for streaming LLM responses                                                                                                                           |
+| Framework           | Fastify                       | Faster than Express, native JSON schema validation, built-in plugin system, first-class TypeScript support                                                                        |
+| ORM                 | Drizzle                       | Schema-first with typed migrations, excellent TypeScript inference, lighter than Prisma, pairs naturally with Postgres                                                            |
+| Primary DB          | PostgreSQL                    | Stores documents, chunks metadata, chat history, job state                                                                                                                        |
+| Vector Store        | Qdrant                        | Dedicated ANN search; payload storage means chunk text lives alongside vectors for fast retrieval                                                                                 |
+| Object Storage      | AWS S3                        | Raw file storage; presigned URLs for uploads                                                                                                                                      |
+| Job Queue           | BullMQ + Redis                | Durable async ingestion queue; supports retries, priority, and concurrency limits                                                                                                 |
+| LLM                 | OpenAI GPT-4o                 | Chat completions with streaming (SSE)                                                                                                                                             |
+| Embeddings          | OpenAI text-embedding-3-large | 3072-dim, best retrieval quality in the OpenAI lineup                                                                                                                             |
+| Reranking           | Cohere Rerank (`rerank-v3.5`) | Hosted cross-encoder; replaced a local `@xenova/transformers` model after production timing showed CPU-bound local inference dominating chat latency on Render's constrained vCPU |
+| Audio Transcription | OpenAI Whisper                | Milestone 2                                                                                                                                                                       |
+| Vision / OCR        | OpenAI GPT-4o Vision          | Milestone 2                                                                                                                                                                       |
+| Validation          | Zod                           | Runtime schema validation; integrated with Fastify via `fastify-type-provider-zod`                                                                                                |
+| Config              | `dotenv` + `zod` env schema   | Fails fast on missing env vars at startup                                                                                                                                         |
+| Testing             | Vitest                        | Fast, ESM-native, great TypeScript support                                                                                                                                        |
 
 ---
 
@@ -316,9 +317,14 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
    Single query; results joined with Qdrant scores in application layer
 
 5. Rerank
-   Local cross-encoder (ms-marco-MiniLM via @xenova/transformers) scores each
-   candidate against the raw query (not the HyDE text used for embedding) and
-   truncates the widened candidate pool down to the final top_k.
+   Cohere Rerank API (rerank-v3.5) scores each candidate against the raw query
+   (not the HyDE text used for embedding) and truncates the widened candidate
+   pool down to the final top_k. Previously a local cross-encoder
+   (ms-marco-MiniLM via @xenova/transformers) — replaced after production
+   timing data showed CPU-bound local inference was ~18-23x slower per
+   candidate on Render's constrained vCPU than on localhost, dominating
+   end-to-end chat latency (rerank stage alone: ~7s vs. ~300ms for a
+   comparable candidate count).
 
 6. Build context
    Concatenate top chunks with source attribution headers
@@ -694,7 +700,7 @@ A Next.js 15 app (App Router) with:
 **4. Hybrid Search**
 Combine dense vector search (Qdrant) with sparse BM25 keyword search. Qdrant supports sparse vectors natively (as of v1.7). Merge results with Reciprocal Rank Fusion (RRF) before the reranking step. Dramatically improves recall for queries with rare keywords, names, and identifiers.
 
-**5. Reranking — implemented.** See Query Pipeline step 5. A local cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2` via `@xenova/transformers`) reranks an over-fetched candidate pool before context assembly. No external vendor/API — first request after a cold start incurs a one-time ONNX model load.
+**5. Reranking — implemented.** See Query Pipeline step 5. Cohere Rerank (`rerank-v3.5`) reranks an over-fetched candidate pool before context assembly. Originally a local cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2` via `@xenova/transformers`, no external vendor/API, but paid for with a one-time ONNX model load on cold start) — switched to a hosted reranker API after production timing data on Render (0.5 vCPU) showed local ONNX inference dominating chat latency.
 
 **6. Slack Integration**
 Use the Slack Web API to ingest channel messages and thread history. Treat each thread as a document. Useful for teams repurposing this as a shared knowledge base.

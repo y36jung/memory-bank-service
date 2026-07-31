@@ -14,6 +14,7 @@ const envSchema = z
     AWS_SECRET_ACCESS_KEY: z.string(),
     S3_BUCKET_NAME: z.string(),
     OPENAI_API_KEY: z.string().startsWith('sk-'),
+    COHERE_API_KEY: z.string(),
     JWT_SECRET: z.string().min(32),
     REGISTRATION_SECRET: z.string().optional(),
     MAX_FILE_SIZE_BYTES: z.coerce.number().default(524_288_000),
