@@ -78,7 +78,7 @@ vi.mock('../../../src/services/queryClassifier.js', () => ({
 import * as retrievalModule from '../../../src/services/retrieval.js';
 import * as queryClassifierModule from '../../../src/services/queryClassifier.js';
 import { db } from '../../../src/db/index.js';
-import { streamChatResponse } from '../../../src/services/chat.js';
+import { streamChatResponse, type Source } from '../../../src/services/chat.js';
 import { AppError } from '../../../src/lib/errors.js';
 import { DEFAULT_SESSION_TITLE } from '../../../src/db/schema.js';
 
@@ -493,5 +493,49 @@ describe('AC-TITLE-4: a null title result leaves the session untouched', () => {
     expect(queryClassifierModule.generateSessionTitle).toHaveBeenCalled();
     expect(setMock).not.toHaveBeenCalled();
     expect(sseEventsWritten(reply).some((e) => e['type'] === 'title')).toBe(false);
+  });
+});
+
+describe('AC-DEDUPE: sources are deduped by document', () => {
+  it('collapses multiple chunks from the same document into one source, keeping the first (highest-scoring) chunk', async () => {
+    const chunkA1 = { ...MOCK_CHUNK, chunkId: 'chunk-1', score: 0.9, content: 'best passage' };
+    const chunkA2 = {
+      ...MOCK_CHUNK,
+      chunkId: 'chunk-2',
+      score: 0.7,
+      content: 'weaker passage',
+    };
+    const chunkB = {
+      ...MOCK_CHUNK,
+      chunkId: 'chunk-3',
+      documentId: 'doc-2',
+      documentName: 'other.txt',
+      score: 0.8,
+    };
+
+    const { valuesMock } = setupHappyPath(
+      [],
+      { mode: 'recent' },
+      {
+        type: 'chunk_results',
+        // Pre-sorted best-score-first, as rerank() guarantees.
+        chunks: [chunkA1, chunkA2, chunkB],
+        lowConfidence: false,
+      },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'a query', reply);
+
+    const events = sseEventsWritten(reply);
+    const doneEvent = events.find((e) => e['type'] === 'done') as { sources: Source[] };
+    expect(doneEvent.sources).toHaveLength(2);
+    const docASource = doneEvent.sources.find((s) => s.documentId === 'doc-1');
+    expect(docASource).toMatchObject({ chunkId: 'chunk-1', content: 'best passage' });
+
+    // Persisted sources match what was emitted — reloading the session via
+    // GET /chat/sessions/:id won't reproduce the duplicate.
+    const insertedValues = valuesMock.mock.calls.at(-1)?.[0] as { sources: Source[] };
+    expect(insertedValues.sources).toEqual(doneEvent.sources);
   });
 });

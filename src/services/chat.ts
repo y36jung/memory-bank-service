@@ -154,6 +154,23 @@ function buildDocumentListContext(docs: RetrievedDocument[]): string {
 }
 
 /**
+ * Collapses sources to one entry per document, keeping the first occurrence.
+ * Chunk-based sources are already sorted best-score-first (rerank()), so this
+ * keeps the highest-scoring chunk's snippet/page/score per document instead
+ * of showing the same document once per matching chunk.
+ */
+function dedupeSourcesByDocument(sources: Source[]): Source[] {
+  const seen = new Set<string>();
+  const result: Source[] = [];
+  for (const source of sources) {
+    if (seen.has(source.documentId)) continue;
+    seen.add(source.documentId);
+    result.push(source);
+  }
+  return result;
+}
+
+/**
  * Load chat history for the current session, resolving `historyScope` into a
  * concrete row limit ('recent' → HISTORY_DEPTH, 'count' → the extracted
  * count, 'full_session' → unbounded), then applying a token-budget guard so
@@ -345,14 +362,16 @@ export async function streamChatResponse(
     }));
   } else {
     contextString = buildContextString(retrievalResult.chunks);
-    sources = retrievalResult.chunks.map((c) => ({
-      chunkId: c.chunkId,
-      documentId: c.documentId,
-      documentName: c.documentName,
-      score: c.score,
-      pageNumber: c.pageNumber,
-      content: c.content,
-    }));
+    sources = dedupeSourcesByDocument(
+      retrievalResult.chunks.map((c) => ({
+        chunkId: c.chunkId,
+        documentId: c.documentId,
+        documentName: c.documentName,
+        score: c.score,
+        pageNumber: c.pageNumber,
+        content: c.content,
+      })),
+    );
     lowConfidence = retrievalResult.lowConfidence;
   }
 
