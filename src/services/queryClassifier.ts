@@ -60,6 +60,12 @@ const HistoryScopeSchema = z
   })
   .strip();
 
+// Chars of the first user message sent to the title generator — bounds
+// cost/latency for this auxiliary call regardless of how long the message is.
+const TITLE_INPUT_CHAR_LIMIT = 2000;
+
+const TitleSchema = z.object({ title: z.string().min(1).max(200) }).strip();
+
 const QueryClassificationSchema = z
   .object({
     intent: z.enum(['list_documents', 'search_content']),
@@ -156,6 +162,26 @@ const CLASSIFY_HISTORY_SCOPE_TOOL: OpenAI.ChatCompletionTool = {
         },
       },
       required: ['mode'],
+    },
+  },
+};
+
+const GENERATE_TITLE_TOOL: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'generate_session_title',
+    description:
+      "Generate a short, descriptive title for a chat session based on the user's first message.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description:
+            'Concise title, 3-6 words, no surrounding quotes or trailing punctuation, summarizing the topic of the message.',
+        },
+      },
+      required: ['title'],
     },
   },
 };
@@ -324,4 +350,53 @@ export async function classifyHistoryScope(query: string): Promise<HistoryScope>
   }
 
   return { mode };
+}
+
+/**
+ * Calls GPT-4o-mini with a tool call to derive a short session title from a
+ * user's first message. Degrades to `null` on any API error, parse error, or
+ * validation failure — same convention as classifyQuery/classifyHistoryScope
+ * — so a classifier outage never blocks or breaks the surrounding chat
+ * request; the caller simply leaves the session at its default title.
+ */
+export async function generateSessionTitle(firstMessage: string): Promise<string | null> {
+  let response: OpenAI.ChatCompletion;
+  try {
+    response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 64,
+      tools: [GENERATE_TITLE_TOOL],
+      tool_choice: 'required',
+      messages: [{ role: 'user', content: firstMessage.slice(0, TITLE_INPUT_CHAR_LIMIT) }],
+    });
+  } catch (err) {
+    console.error('generateSessionTitle: OpenAI API error, leaving default title:', err);
+    return null;
+  }
+
+  const toolCall = response.choices[0]?.message?.tool_calls?.[0];
+  if (!toolCall || toolCall.type !== 'function') {
+    return null;
+  }
+
+  let rawInput: unknown;
+  try {
+    rawInput = JSON.parse(toolCall.function.arguments);
+  } catch {
+    console.error(
+      'generateSessionTitle: failed to parse tool call arguments, leaving default title',
+    );
+    return null;
+  }
+
+  const parseResult = TitleSchema.safeParse(rawInput);
+  if (!parseResult.success) {
+    console.error(
+      'generateSessionTitle: invalid structure from LLM, leaving default title:',
+      parseResult.error.issues,
+    );
+    return null;
+  }
+
+  return parseResult.data.title.trim();
 }

@@ -1,10 +1,14 @@
 import OpenAI from 'openai';
 import type { FastifyReply } from 'fastify';
 import { db } from '../db/index.js';
-import { messages, chatSessions } from '../db/schema.js';
+import { messages, chatSessions, DEFAULT_SESSION_TITLE } from '../db/schema.js';
 import { eq, desc, and, or, ne, sql } from 'drizzle-orm';
 import { retrieve, type RetrievedChunk, type RetrievedDocument } from './retrieval.js';
-import { classifyHistoryScope, type HistoryScope } from './queryClassifier.js';
+import {
+  classifyHistoryScope,
+  generateSessionTitle,
+  type HistoryScope,
+} from './queryClassifier.js';
 import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
 import { countTokens } from '../lib/tokenizer.js';
@@ -230,6 +234,9 @@ export async function loadHistory(sessionId: string, historyScope: HistoryScope)
  * Handle a user message for the given session:
  *  1. Validates the session exists.
  *  2. Retrieves relevant chunks or document list from the store.
+ *  2b. On the session's first message (default title, no prior messages),
+ *      generates and persists a session title, emitted as its own SSE
+ *      'title' event.
  *  3. Persists the user message.
  *  3b. If retrieval found zero chunks, short-circuits with
  *      NO_RELEVANT_DOCS_MESSAGE — no GPT-4o call.
@@ -248,21 +255,45 @@ export async function streamChatResponse(
   reply: FastifyReply,
 ): Promise<void> {
   // ── Step 1: Validate session ──────────────────────────────────────────────
-  const sessionRows = await db
-    .select({ id: chatSessions.id })
+  const [sessionRow] = await db
+    .select({
+      id: chatSessions.id,
+      title: chatSessions.title,
+      hasMessages: sql<boolean>`EXISTS (SELECT 1 FROM ${messages} WHERE ${messages.sessionId} = ${chatSessions.id})`,
+    })
     .from(chatSessions)
     .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
 
-  if (sessionRows.length === 0) {
+  if (!sessionRow) {
     throw new AppError('SESSION_NOT_FOUND', 'Session not found', 404);
   }
 
-  // ── Step 2: Retrieve grounding context + classify history scope ──────────
-  // Independent of each other — run in parallel.
-  const [retrievalResult, historyScope] = await Promise.all([
+  // Only auto-name a session on its first message, and only if the title is
+  // still the untouched default — never clobber a title the user set
+  // explicitly (at creation or via PATCH).
+  const shouldGenerateTitle = sessionRow.title === DEFAULT_SESSION_TITLE && !sessionRow.hasMessages;
+
+  // ── Step 2: Retrieve grounding context, classify history scope, and (on a
+  // session's first message) generate a title — all independent of each
+  // other, so run in parallel.
+  const [retrievalResult, historyScope, generatedTitle] = await Promise.all([
     retrieve(userId, userMessage),
     classifyHistoryScope(userMessage),
+    shouldGenerateTitle ? generateSessionTitle(userMessage) : Promise.resolve(null),
   ]);
+
+  // ── Step 2b: Persist + emit the generated title, if any ──────────────────
+  // Emitted as its own SSE event as soon as it's ready — independent of
+  // whether the answer below ends up being the zero-chunk short-circuit or a
+  // normal streamed reply — so the client can rename the session without
+  // waiting for the full answer.
+  if (generatedTitle) {
+    await db
+      .update(chatSessions)
+      .set({ title: generatedTitle, updatedAt: new Date() })
+      .where(eq(chatSessions.id, sessionId));
+    reply.raw.write(`data: ${JSON.stringify({ type: 'title', title: generatedTitle })}\n\n`);
+  }
 
   // ── Step 3: Insert user message ──────────────────────────────────────────
   await db.insert(messages).values({

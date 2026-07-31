@@ -2,7 +2,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod/v4';
 import { and, eq, desc, ilike } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { chatSessions, messages } from '../../db/schema.js';
+import { chatSessions, messages, DEFAULT_SESSION_TITLE } from '../../db/schema.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
 
 export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -15,7 +15,7 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const [session] = await db
         .insert(chatSessions)
-        .values({ userId: request.user.id, title: request.body.title ?? 'New Chat' })
+        .values({ userId: request.user.id, title: request.body.title ?? DEFAULT_SESSION_TITLE })
         .returning();
       sendSuccess(reply, session, 201);
     },

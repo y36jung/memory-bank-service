@@ -466,6 +466,25 @@ data: {"messageId": "...", "sources": [{"documentName": "...", "chunkIndex": 0, 
 score-threshold backoff floor, not the primary threshold (Query Pipeline
 step 3) — a signal that the sources may be a weak match for the question.
 
+**Session auto-naming:** the first message sent to a session whose title is
+still the untouched default (`'New Chat'`) triggers a one-shot GPT-4o-mini
+tool call (`generateSessionTitle`, `src/services/queryClassifier.ts`) that
+derives a short title from that message. Runs in parallel with retrieval and
+history-scope classification, so it adds no serial latency. On success the
+session's `title` is updated in Postgres and an additional SSE event is
+emitted as soon as it's ready — independent of the answer stream:
+
+```
+event: title
+data: {"title": "Trip Planning Ideas"}
+```
+
+Later messages in the same session never retrigger it, and a title the user
+set explicitly (at session creation or via `PATCH /chat/sessions/:id`) is
+never overwritten. On any classifier failure (API error, malformed output)
+the session silently stays `'New Chat'` — same degrade-to-default convention
+as `classifyQuery`/`classifyHistoryScope` — and can still be renamed manually.
+
 OAuth endpoints have been removed for now — see [Future Additions](#future-additions) for the deferred API surface.
 
 ---
