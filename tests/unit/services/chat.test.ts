@@ -18,6 +18,15 @@
  * AC-HS-3: 'count' scope queries with LIMIT = the extracted count
  * AC-HS-4: history over MAX_HISTORY_TOKENS is truncated, dropping the oldest
  *          messages first (most-recent-preserved)
+ * AC-TITLE-1: first message on a default-titled session calls
+ *             generateSessionTitle, persists the result, and emits a 'title'
+ *             SSE event
+ * AC-TITLE-2: generateSessionTitle is NOT called when the session already
+ *             has messages
+ * AC-TITLE-3: generateSessionTitle is NOT called when the session has a
+ *             user-set (non-default) title, even on its first message
+ * AC-TITLE-4: a null result from generateSessionTitle leaves the title
+ *             untouched and emits no 'title' event
  *
  * NOT covered here: the anti-hallucination-compounding guard (excluding
  * assistant messages with no retrieved sources) lives in loadHistory()'s SQL
@@ -46,10 +55,6 @@ vi.mock('../../../src/services/retrieval.js', () => ({
   retrieve: vi.fn(),
 }));
 
-vi.mock('../../../src/services/queryClassifier.js', () => ({
-  classifyHistoryScope: vi.fn(),
-}));
-
 vi.mock('../../../src/db/index.js', () => {
   const selectMock = {
     from: vi.fn().mockReturnThis(),
@@ -59,16 +64,23 @@ vi.mock('../../../src/db/index.js', () => {
     db: {
       select: vi.fn(() => selectMock),
       insert: vi.fn(),
+      update: vi.fn(),
       _selectMock: selectMock,
     },
   };
 });
+
+vi.mock('../../../src/services/queryClassifier.js', () => ({
+  classifyHistoryScope: vi.fn(),
+  generateSessionTitle: vi.fn(),
+}));
 
 import * as retrievalModule from '../../../src/services/retrieval.js';
 import * as queryClassifierModule from '../../../src/services/queryClassifier.js';
 import { db } from '../../../src/db/index.js';
 import { streamChatResponse } from '../../../src/services/chat.js';
 import { AppError } from '../../../src/lib/errors.js';
+import { DEFAULT_SESSION_TITLE } from '../../../src/db/schema.js';
 
 const USER_A = 'user-a-11111111-1111-1111-1111-111111111111';
 const USER_B = 'user-b-22222222-2222-2222-2222-222222222222';
@@ -99,11 +111,22 @@ function makeHistoryChain(unboundedRows: { role: string; content: string }[]) {
   };
 }
 
-function makeSessionOkChain() {
+// Defaults represent an established session (already has messages, custom
+// title) — i.e. NOT eligible for auto-titling, so existing happy-path tests
+// that don't care about titling are unaffected. Auto-title tests below pass
+// explicit overrides to make the session look brand new.
+function makeSessionOkChain(overrides: { title?: string; hasMessages?: boolean } = {}) {
+  const { title = 'Some Existing Chat', hasMessages = true } = overrides;
   return {
     from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue([{ id: SESSION_OWNED_BY_A }]),
+    where: vi.fn().mockResolvedValue([{ id: SESSION_OWNED_BY_A, title, hasMessages }]),
   };
+}
+
+function makeUpdateChain() {
+  const whereMock = vi.fn().mockResolvedValue(undefined);
+  const setMock = vi.fn().mockReturnValue({ where: whereMock });
+  return { setMock, whereMock };
 }
 
 // A single non-empty, normal-confidence chunk — used by setupHappyPath so
@@ -134,6 +157,7 @@ function setupHappyPath(
     chunks: [MOCK_CHUNK],
     lowConfidence: false,
   },
+  sessionOverrides: { title?: string; hasMessages?: boolean } = {},
 ) {
   const { chain: historyChain, limitMock } = makeHistoryChain(historyRows);
 
@@ -141,22 +165,25 @@ function setupHappyPath(
   vi.mocked(db.select).mockImplementation(() => {
     callCount++;
     if (callCount === 1) {
-      return makeSessionOkChain() as unknown as ReturnType<typeof db.select>;
+      return makeSessionOkChain(sessionOverrides) as unknown as ReturnType<typeof db.select>;
     }
     return historyChain as unknown as ReturnType<typeof db.select>;
   });
 
   vi.mocked(retrievalModule.retrieve).mockResolvedValue(retrievalResult);
   vi.mocked(queryClassifierModule.classifyHistoryScope).mockResolvedValue(scope);
+  vi.mocked(queryClassifierModule.generateSessionTitle).mockResolvedValue(null);
   const valuesMock = vi
     .fn()
     .mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: 'msg-1' }]) });
   vi.mocked(db.insert).mockReturnValue({
     values: valuesMock,
   } as unknown as ReturnType<typeof db.insert>);
+  const { setMock, whereMock: updateWhereMock } = makeUpdateChain();
+  vi.mocked(db.update).mockReturnValue({ set: setMock } as unknown as ReturnType<typeof db.update>);
   mockChatCreate.mockResolvedValue((async function* () {})());
 
-  return { limitMock, valuesMock };
+  return { limitMock, valuesMock, setMock, updateWhereMock };
 }
 
 /** Parses the `data: {...}\n\n` SSE frames written to reply.raw.write into objects. */
@@ -389,5 +416,82 @@ describe('AC-LOWCONF: low-confidence retrieval (score-threshold backoff) hedging
     const events = sseEventsWritten(reply);
     const doneEvent = events.find((e) => e['type'] === 'done');
     expect(doneEvent).toMatchObject({ uncertain: false });
+  });
+});
+
+describe('AC-TITLE-1: first message on a default-titled session auto-generates a title', () => {
+  it('calls generateSessionTitle, persists the title, and emits a title SSE event', async () => {
+    const { setMock, updateWhereMock } = setupHappyPath(
+      [],
+      { mode: 'recent' },
+      { type: 'chunk_results', chunks: [MOCK_CHUNK], lowConfidence: false },
+      { title: DEFAULT_SESSION_TITLE, hasMessages: false },
+    );
+    vi.mocked(queryClassifierModule.generateSessionTitle).mockResolvedValue('Trip Planning Ideas');
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'help me plan a trip', reply);
+
+    expect(queryClassifierModule.generateSessionTitle).toHaveBeenCalledWith('help me plan a trip');
+    expect(setMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Trip Planning Ideas' }));
+    expect(updateWhereMock).toHaveBeenCalled();
+
+    const events = sseEventsWritten(reply);
+    expect(events[0]).toEqual({ type: 'title', title: 'Trip Planning Ideas' });
+  });
+});
+
+describe('AC-TITLE-2: no auto-title when the session already has messages', () => {
+  it('does not call generateSessionTitle for a non-first message, even with a default title', async () => {
+    const { setMock } = setupHappyPath(
+      [],
+      { mode: 'recent' },
+      { type: 'chunk_results', chunks: [MOCK_CHUNK], lowConfidence: false },
+      { title: DEFAULT_SESSION_TITLE, hasMessages: true },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'a follow-up message', reply);
+
+    expect(queryClassifierModule.generateSessionTitle).not.toHaveBeenCalled();
+    expect(setMock).not.toHaveBeenCalled();
+    expect(sseEventsWritten(reply).some((e) => e['type'] === 'title')).toBe(false);
+  });
+});
+
+describe('AC-TITLE-3: no auto-title when the session has a user-set title', () => {
+  it('does not call generateSessionTitle on the first message if the title is not the default', async () => {
+    const { setMock } = setupHappyPath(
+      [],
+      { mode: 'recent' },
+      { type: 'chunk_results', chunks: [MOCK_CHUNK], lowConfidence: false },
+      { title: 'My Custom Title', hasMessages: false },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'hello', reply);
+
+    expect(queryClassifierModule.generateSessionTitle).not.toHaveBeenCalled();
+    expect(setMock).not.toHaveBeenCalled();
+    expect(sseEventsWritten(reply).some((e) => e['type'] === 'title')).toBe(false);
+  });
+});
+
+describe('AC-TITLE-4: a null title result leaves the session untouched', () => {
+  it('does not update the session or emit a title event when generateSessionTitle resolves null', async () => {
+    const { setMock } = setupHappyPath(
+      [],
+      { mode: 'recent' },
+      { type: 'chunk_results', chunks: [MOCK_CHUNK], lowConfidence: false },
+      { title: DEFAULT_SESSION_TITLE, hasMessages: false },
+    );
+    vi.mocked(queryClassifierModule.generateSessionTitle).mockResolvedValue(null);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'hello', reply);
+
+    expect(queryClassifierModule.generateSessionTitle).toHaveBeenCalled();
+    expect(setMock).not.toHaveBeenCalled();
+    expect(sseEventsWritten(reply).some((e) => e['type'] === 'title')).toBe(false);
   });
 });

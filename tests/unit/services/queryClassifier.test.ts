@@ -1,6 +1,6 @@
 /**
  * Unit tests for src/services/queryClassifier.ts — classifyQuery,
- * classifyHistoryScope
+ * classifyHistoryScope, generateSessionTitle
  *
  * Mocks: openai, ../../../src/config/env.js
  * No real network calls.
@@ -28,6 +28,14 @@
  * AC-CQ-8: list_documents with no filters → still returns { intent, filters: null } (not null)
  * AC-CQ-9: currentDate is injected into the system prompt message sent to OpenAI
  * AC-CQ-10: search_content with no filters → returns null (degrades to pure vector)
+ *
+ * generateSessionTitle criteria (AC-GT):
+ * AC-GT-1: successful tool call → returns the trimmed title string
+ * AC-GT-2: API error → returns null
+ * AC-GT-3: no tool call in response → returns null
+ * AC-GT-4: invalid JSON in tool call arguments → returns null
+ * AC-GT-5: empty-string title fails schema validation → returns null
+ * AC-GT-6: tool_choice is set to 'required'
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -58,7 +66,11 @@ vi.mock('../../../src/config/env.js', () => ({
   env: { OPENAI_API_KEY: 'sk-test-key' },
 }));
 
-import { classifyQuery, classifyHistoryScope } from '../../../src/services/queryClassifier.js';
+import {
+  classifyQuery,
+  classifyHistoryScope,
+  generateSessionTitle,
+} from '../../../src/services/queryClassifier.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -524,6 +536,74 @@ describe('AC-HS-CQ-10: tool_choice is required', () => {
     mockChatCreate.mockResolvedValue(makeToolCallResponse({ mode: 'recent' }));
 
     await classifyHistoryScope('some query');
+
+    expect(mockChatCreate).toHaveBeenCalledTimes(1);
+    const callArgs = mockChatCreate.mock.calls[0][0];
+    expect(callArgs.tool_choice).toBe('required');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateSessionTitle
+// ---------------------------------------------------------------------------
+
+describe('AC-GT-1: successful tool call returns the trimmed title', () => {
+  it('returns the title string from the tool call', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ title: 'Trip Planning Ideas' }));
+
+    const result = await generateSessionTitle('help me plan a trip to Japan');
+    expect(result).toBe('Trip Planning Ideas');
+  });
+
+  it('trims surrounding whitespace from the returned title', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ title: '  Trip Planning Ideas  ' }));
+
+    const result = await generateSessionTitle('help me plan a trip to Japan');
+    expect(result).toBe('Trip Planning Ideas');
+  });
+});
+
+describe('AC-GT-2: API error returns null', () => {
+  it('returns null when openai.chat.completions.create rejects', async () => {
+    mockChatCreate.mockRejectedValue(new Error('OpenAI 401 Unauthorized'));
+
+    const result = await generateSessionTitle('some message');
+    expect(result).toBeNull();
+  });
+});
+
+describe('AC-GT-3: no tool call returns null', () => {
+  it('returns null when choices[0].message has no tool_calls', async () => {
+    mockChatCreate.mockResolvedValue(makeNoToolCallResponse());
+
+    const result = await generateSessionTitle('some message');
+    expect(result).toBeNull();
+  });
+});
+
+describe('AC-GT-4: invalid JSON in tool call arguments returns null', () => {
+  it('returns null when tool_calls[0].function.arguments is invalid JSON', async () => {
+    mockChatCreate.mockResolvedValue(makeRawArgsResponse('not valid json {{{'));
+
+    const result = await generateSessionTitle('some message');
+    expect(result).toBeNull();
+  });
+});
+
+describe('AC-GT-5: empty-string title fails validation, returns null', () => {
+  it('returns null when the tool call title is an empty string', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ title: '' }));
+
+    const result = await generateSessionTitle('some message');
+    expect(result).toBeNull();
+  });
+});
+
+describe('AC-GT-6: tool_choice is required', () => {
+  it('calls openai.chat.completions.create with tool_choice = "required"', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ title: 'Some Title' }));
+
+    await generateSessionTitle('some message');
 
     expect(mockChatCreate).toHaveBeenCalledTimes(1);
     const callArgs = mockChatCreate.mock.calls[0][0];

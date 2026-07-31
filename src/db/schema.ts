@@ -90,6 +90,11 @@ export const ingestionJobs = pgTable('ingestion_jobs', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// Default title for a newly-created session, before any auto-naming or
+// manual rename has happened. Shared so callers can tell an untouched
+// session apart from one the user (or auto-naming) has already titled.
+export const DEFAULT_SESSION_TITLE = 'New Chat';
+
 export const chatSessions = pgTable(
   'chat_sessions',
   {
@@ -97,7 +102,7 @@ export const chatSessions = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    title: text('title').notNull().default('New Chat'),
+    title: text('title').notNull().default(DEFAULT_SESSION_TITLE),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
