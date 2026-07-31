@@ -331,7 +331,7 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
    refusal, so an ungrounded completion is never possible for that case.
    Otherwise:
    System prompt: instructs the model to answer from context only,
-                  cite sources, and say "I don't know" when context is insufficient.
+                  and say "I don't know" when context is insufficient.
                   When step 3 only cleared the backoff floor (low-confidence),
                   an extra instruction tells the model to hedge and ask the
                   user to clarify instead of answering confidently.
