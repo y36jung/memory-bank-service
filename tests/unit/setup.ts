@@ -15,4 +15,5 @@ process.env['AWS_SECRET_ACCESS_KEY'] = 'test-secret-access-key';
 process.env['S3_BUCKET_NAME'] = 'test-bucket';
 process.env['OPENAI_API_KEY'] = 'sk-test-openai-key-placeholder-for-unit-tests';
 process.env['ANTHROPIC_API_KEY'] = 'test-anthropic-key';
+process.env['COHERE_API_KEY'] = 'test-cohere-key-placeholder-for-unit-tests';
 process.env['JWT_SECRET'] = 'test-jwt-secret-that-is-at-least-32-chars!!';

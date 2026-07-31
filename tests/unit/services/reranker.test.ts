@@ -1,39 +1,22 @@
 /**
  * Unit tests for src/services/reranker.ts — rerank
  *
- * @xenova/transformers is mocked — no real ONNX model download/inference.
+ * global.fetch is mocked — no real Cohere API calls.
  *
  * Criteria covered:
- * AC-RR-1: returns [] for empty input without loading the cross-encoder
- * AC-RR-2: reorders candidates by cross-encoder score descending
- * AC-RR-3: replaces chunk.score with the cross-encoder score
- * AC-RR-4: truncates results to topN
- * AC-RR-5: scores every candidate against the raw query (text_pair = chunk content)
- * AC-RR-6: loads the cross-encoder lazily and reuses it across calls (no reload per call)
+ * AC-RR-1: returns [] for empty input without calling Cohere
+ * AC-RR-2: reorders candidates per Cohere's result order
+ * AC-RR-3: replaces chunk.score with the Cohere relevance score
+ * AC-RR-4: sends top_n = min(topN, chunks.length) to Cohere
+ * AC-RR-5: scores every candidate against the raw query (documents = chunk contents)
+ * AC-RR-6: retries on 429 with backoff, then throws after MAX_RETRIES
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RetrievedChunk } from '../../../src/services/retrieval.js';
 
-// ---------------------------------------------------------------------------
-// Hoisted mocks for @xenova/transformers
-// ---------------------------------------------------------------------------
-
-const { mockTokenizerFn, mockModelFn, mockFromPretrainedTokenizer, mockFromPretrainedModel } =
-  vi.hoisted(() => {
-    const mockTokenizerFn = vi.fn();
-    const mockModelFn = vi.fn();
-    return {
-      mockTokenizerFn,
-      mockModelFn,
-      mockFromPretrainedTokenizer: vi.fn(),
-      mockFromPretrainedModel: vi.fn(),
-    };
-  });
-
-vi.mock('@xenova/transformers', () => ({
-  AutoTokenizer: { from_pretrained: mockFromPretrainedTokenizer },
-  AutoModelForSequenceClassification: { from_pretrained: mockFromPretrainedModel },
+vi.mock('../../../src/config/env.js', () => ({
+  env: { COHERE_API_KEY: 'test-cohere-key' },
 }));
 
 import { rerank } from '../../../src/services/reranker.js';
@@ -61,15 +44,20 @@ function makeChunk(overrides: Partial<RetrievedChunk> = {}): RetrievedChunk {
   };
 }
 
+function mockFetchOnce(status: number, body: unknown): void {
+  fetchMock.mockResolvedValueOnce({
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+  } as Response);
+}
+
+const fetchMock = vi.fn();
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mockFromPretrainedTokenizer.mockResolvedValue(mockTokenizerFn);
-  mockFromPretrainedModel.mockResolvedValue(mockModelFn);
-  mockTokenizerFn.mockImplementation((query: string, opts: { text_pair: string }) => ({
-    query,
-    passage: opts.text_pair,
-  }));
-  mockModelFn.mockResolvedValue({ logits: { data: [0] } });
+  vi.stubGlobal('fetch', fetchMock);
 });
 
 // ---------------------------------------------------------------------------
@@ -77,11 +65,10 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('AC-RR-1: empty input', () => {
-  it('returns [] without loading the cross-encoder', async () => {
+  it('returns [] without calling Cohere', async () => {
     const result = await rerank('query', [], 5);
     expect(result).toEqual([]);
-    expect(mockFromPretrainedTokenizer).not.toHaveBeenCalled();
-    expect(mockFromPretrainedModel).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -89,45 +76,39 @@ describe('AC-RR-1: empty input', () => {
 // AC-RR-2, AC-RR-3: reordering + score replacement
 // ---------------------------------------------------------------------------
 
-describe('AC-RR-2/3: reorders by cross-encoder score and replaces chunk.score', () => {
-  it('sorts candidates descending by cross-encoder relevance', async () => {
+describe('AC-RR-2/3: reorders per Cohere result order and replaces chunk.score', () => {
+  it('maps Cohere results (already sorted) back onto the original chunks', async () => {
     const irrelevant = makeChunk({ chunkId: 'irrelevant', content: 'irrelevant passage' });
     const relevant = makeChunk({ chunkId: 'relevant', content: 'highly relevant passage' });
 
-    mockModelFn.mockImplementation((inputs: { passage: string }) =>
-      Promise.resolve({
-        logits: { data: [inputs.passage === 'highly relevant passage' ? 5.2 : -3.1] },
-      }),
-    );
+    mockFetchOnce(200, {
+      results: [
+        { index: 1, relevance_score: 0.92 },
+        { index: 0, relevance_score: 0.03 },
+      ],
+    });
 
     const result = await rerank('query', [irrelevant, relevant], 10);
 
     expect(result.map((c) => c.chunkId)).toEqual(['relevant', 'irrelevant']);
-    expect(result[0]?.score).toBe(5.2);
-    expect(result[1]?.score).toBe(-3.1);
+    expect(result[0]?.score).toBe(0.92);
+    expect(result[1]?.score).toBe(0.03);
   });
 });
 
 // ---------------------------------------------------------------------------
-// AC-RR-4: truncation
+// AC-RR-4: top_n sent to Cohere
 // ---------------------------------------------------------------------------
 
-describe('AC-RR-4: truncates to topN', () => {
-  it('returns only the top N candidates by rerank score', async () => {
-    const chunks = [
-      makeChunk({ chunkId: 'a', content: 'a' }),
-      makeChunk({ chunkId: 'b', content: 'b' }),
-      makeChunk({ chunkId: 'c', content: 'c' }),
-    ];
+describe('AC-RR-4: sends top_n = min(topN, chunks.length)', () => {
+  it('caps top_n at the candidate count when topN exceeds it', async () => {
+    const chunks = [makeChunk({ chunkId: 'a' }), makeChunk({ chunkId: 'b' })];
+    mockFetchOnce(200, { results: [{ index: 0, relevance_score: 1 }] });
 
-    mockModelFn.mockImplementation((inputs: { passage: string }) =>
-      Promise.resolve({ logits: { data: [{ a: 1, b: 3, c: 2 }[inputs.passage]] } }),
-    );
+    await rerank('query', chunks, 10);
 
-    const result = await rerank('query', chunks, 2);
-
-    expect(result).toHaveLength(2);
-    expect(result.map((c) => c.chunkId)).toEqual(['b', 'c']);
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as { top_n: number };
+    expect(body.top_n).toBe(2);
   });
 });
 
@@ -136,38 +117,66 @@ describe('AC-RR-4: truncates to topN', () => {
 // ---------------------------------------------------------------------------
 
 describe('AC-RR-5: scores every candidate against the raw query', () => {
-  it('passes the raw query as text and chunk content as text_pair for every candidate', async () => {
+  it('sends the raw query and every chunk content as documents', async () => {
     const chunks = [
       makeChunk({ chunkId: 'a', content: 'content A' }),
       makeChunk({ chunkId: 'b', content: 'content B' }),
     ];
+    mockFetchOnce(200, {
+      results: [
+        { index: 0, relevance_score: 0.5 },
+        { index: 1, relevance_score: 0.4 },
+      ],
+    });
 
     await rerank('the raw user query', chunks, 10);
 
-    expect(mockTokenizerFn).toHaveBeenCalledTimes(2);
-    for (const call of mockTokenizerFn.mock.calls) {
-      expect(call[0]).toBe('the raw user query');
-    }
-    const passages = mockTokenizerFn.mock.calls.map(
-      (c) => (c[1] as { text_pair: string }).text_pair,
-    );
-    expect(passages.sort()).toEqual(['content A', 'content B']);
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as {
+      query: string;
+      documents: string[];
+    };
+    expect(body.query).toBe('the raw user query');
+    expect(body.documents).toEqual(['content A', 'content B']);
   });
 });
 
 // ---------------------------------------------------------------------------
-// AC-RR-6: lazy singleton loading
+// AC-RR-6: 429 retry with backoff
 // ---------------------------------------------------------------------------
 
-describe('AC-RR-6: loads the cross-encoder lazily and reuses it', () => {
-  it('does not re-invoke from_pretrained on a second rerank() call', async () => {
-    await rerank('q1', [makeChunk()], 5);
-    const tokenizerCallsAfterFirst = mockFromPretrainedTokenizer.mock.calls.length;
-    const modelCallsAfterFirst = mockFromPretrainedModel.mock.calls.length;
+describe('AC-RR-6: retries on 429 with backoff', () => {
+  it('retries after 429 responses and succeeds once Cohere returns 200', async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetchOnce(429, { message: 'rate limited' });
+      mockFetchOnce(200, { results: [{ index: 0, relevance_score: 0.7 }] });
 
-    await rerank('q2', [makeChunk()], 5);
+      const promise = rerank('query', [makeChunk()], 5);
+      await vi.runAllTimersAsync();
+      const result = await promise;
 
-    expect(mockFromPretrainedTokenizer.mock.calls.length).toBe(tokenizerCallsAfterFirst);
-    expect(mockFromPretrainedModel.mock.calls.length).toBe(modelCallsAfterFirst);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(result[0]?.score).toBe(0.7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('throws after exhausting retries on repeated 429s', async () => {
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < 4; i++) {
+        mockFetchOnce(429, { message: 'rate limited' });
+      }
+
+      const promise = rerank('query', [makeChunk()], 5);
+      const expectation = expect(promise).rejects.toThrow('Cohere rerank request failed: 429');
+      await vi.runAllTimersAsync();
+      await expectation;
+
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
