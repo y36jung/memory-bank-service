@@ -4,8 +4,9 @@
  * Standalone script: re-embeds all chunks.content rows from Postgres and
  * upserts them into the Qdrant `memory_bank` collection using deterministic IDs.
  *
- * Usage: tsx scripts/rebuild-qdrant.ts
+ * Usage: tsx scripts/rebuild-qdrant.ts [userId]
  *
+ * If userId is given, only chunks belonging to that user's documents are rebuilt.
  * Idempotent: upsert overwrites existing points with the same deterministic ID.
  * Data source: Postgres `chunks` table only. No S3 access required.
  */
@@ -23,14 +24,25 @@ import { asc, eq, sql } from 'drizzle-orm';
 const BATCH_SIZE = 500;
 
 async function main(): Promise<void> {
-  console.log('[rebuild-qdrant] Starting Qdrant rebuild from Postgres...');
+  const targetUserId = process.argv[2];
+  const userFilter = targetUserId ? eq(documents.userId, targetUserId) : undefined;
+
+  console.log(
+    targetUserId
+      ? `[rebuild-qdrant] Starting Qdrant rebuild from Postgres for user ${targetUserId}...`
+      : '[rebuild-qdrant] Starting Qdrant rebuild from Postgres...',
+  );
 
   // Step 1: Ensure the collection exists before upserting.
   await ensureCollection();
   console.log('[rebuild-qdrant] Collection ensured.');
 
   // Step 2: Count total chunks for progress reporting.
-  const countResult = await db.select({ count: sql<number>`cast(count(*) as int)` }).from(chunks);
+  const countResult = await db
+    .select({ count: sql<number>`cast(count(*) as int)` })
+    .from(chunks)
+    .innerJoin(documents, eq(chunks.documentId, documents.id))
+    .where(userFilter);
   const totalChunks = countResult[0]?.count ?? 0;
   console.log(`[rebuild-qdrant] Total chunks to process: ${totalChunks}`);
 
@@ -55,6 +67,7 @@ async function main(): Promise<void> {
       })
       .from(chunks)
       .innerJoin(documents, eq(chunks.documentId, documents.id))
+      .where(userFilter)
       .orderBy(asc(chunks.documentId), asc(chunks.chunkIndex))
       .limit(BATCH_SIZE)
       .offset(offset);

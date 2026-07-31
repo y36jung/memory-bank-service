@@ -12,6 +12,7 @@ import {
 import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
 import { countTokens } from '../lib/tokenizer.js';
+import { timed } from '../lib/timing.js';
 
 // ─── Client ────────────────────────────────────────────────────────────────────
 
@@ -270,15 +271,19 @@ export async function streamChatResponse(
   userMessage: string,
   reply: FastifyReply,
 ): Promise<void> {
+  const requestStart = Date.now();
+
   // ── Step 1: Validate session ──────────────────────────────────────────────
-  const [sessionRow] = await db
-    .select({
-      id: chatSessions.id,
-      title: chatSessions.title,
-      hasMessages: sql<boolean>`EXISTS (SELECT 1 FROM ${messages} WHERE ${messages.sessionId} = ${chatSessions.id})`,
-    })
-    .from(chatSessions)
-    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
+  const [sessionRow] = await timed('validate session', () =>
+    db
+      .select({
+        id: chatSessions.id,
+        title: chatSessions.title,
+        hasMessages: sql<boolean>`EXISTS (SELECT 1 FROM ${messages} WHERE ${messages.sessionId} = ${chatSessions.id})`,
+      })
+      .from(chatSessions)
+      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId))),
+  );
 
   if (!sessionRow) {
     throw new AppError('SESSION_NOT_FOUND', 'Session not found', 404);
@@ -293,9 +298,11 @@ export async function streamChatResponse(
   // session's first message) generate a title — all independent of each
   // other, so run in parallel.
   const [retrievalResult, historyScope, generatedTitle] = await Promise.all([
-    retrieve(userId, userMessage),
-    classifyHistoryScope(userMessage),
-    shouldGenerateTitle ? generateSessionTitle(userMessage) : Promise.resolve(null),
+    timed('retrieve() total', () => retrieve(userId, userMessage)),
+    timed('classifyHistoryScope', () => classifyHistoryScope(userMessage)),
+    shouldGenerateTitle
+      ? timed('generateSessionTitle', () => generateSessionTitle(userMessage))
+      : Promise.resolve(null),
   ]);
 
   // ── Step 2b: Persist + emit the generated title, if any ──────────────────
@@ -312,11 +319,13 @@ export async function streamChatResponse(
   }
 
   // ── Step 3: Insert user message ──────────────────────────────────────────
-  await db.insert(messages).values({
-    sessionId,
-    role: 'user',
-    content: userMessage,
-  });
+  await timed('insert user message', () =>
+    db.insert(messages).values({
+      sessionId,
+      role: 'user',
+      content: userMessage,
+    }),
+  );
 
   // ── Step 3b: Zero-chunk short-circuit ─────────────────────────────────────
   // Retrieval (including its own score-threshold backoff) found nothing at
@@ -345,6 +354,9 @@ export async function streamChatResponse(
     );
     reply.raw.write(`data: ${JSON.stringify({ type: 'done', messageId, sources: [] })}\n\n`);
     reply.raw.end();
+    console.log(
+      `[timing] total request time (zero-chunk short-circuit): ${Date.now() - requestStart}ms`,
+    );
     return;
   }
 
@@ -381,7 +393,7 @@ export async function streamChatResponse(
   }
 
   // ── Step 5: Load chat history per the classified scope ────────────────────
-  const historyRows = await loadHistory(sessionId, historyScope);
+  const historyRows = await timed('loadHistory', () => loadHistory(sessionId, historyScope));
 
   // ── Step 7: Open GPT-4o streaming completion ──────────────────────────────
   const systemMsg: OpenAI.Chat.ChatCompletionMessageParam = {
@@ -400,6 +412,8 @@ export async function streamChatResponse(
   };
 
   let fullResponse = '';
+  let firstTokenLogged = false;
+  const streamCallStart = Date.now();
 
   try {
     const stream = await openai.chat.completions.create({
@@ -412,10 +426,18 @@ export async function streamChatResponse(
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content;
       if (delta !== undefined && delta !== null) {
+        if (!firstTokenLogged) {
+          console.log(`[timing] GPT-4o time-to-first-token: ${Date.now() - streamCallStart}ms`);
+          console.log(
+            `[timing] total time-to-first-token (end-to-end): ${Date.now() - requestStart}ms`,
+          );
+          firstTokenLogged = true;
+        }
         fullResponse += delta;
         reply.raw.write(`data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`);
       }
     }
+    console.log(`[timing] total request time: ${Date.now() - requestStart}ms`);
   } catch (streamErr) {
     // ── Step 10: Error mid-stream (headers already sent) ───────────────────
     console.error('OpenAI stream error:', streamErr);
