@@ -4,6 +4,7 @@ import { and, eq, desc, ilike } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { chatSessions, messages, DEFAULT_SESSION_TITLE } from '../../db/schema.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
+import { chatSessionOwnershipCondition } from '../../lib/chatOwnership.js';
 
 export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
   // POST /chat/sessions — create a new session
@@ -15,7 +16,11 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const [session] = await db
         .insert(chatSessions)
-        .values({ userId: request.user.id, title: request.body.title ?? DEFAULT_SESSION_TITLE })
+        .values({
+          userId: request.user.id,
+          title: request.body.title ?? DEFAULT_SESSION_TITLE,
+          deviceId: request.user.isDemo ? (request.demoDeviceId ?? null) : null,
+        })
         .returning();
       sendSuccess(reply, session, 201);
     },
@@ -33,9 +38,10 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const { search } = request.query;
+      const ownership = chatSessionOwnershipCondition(request);
       const whereClause = search
-        ? and(eq(chatSessions.userId, request.user.id), ilike(chatSessions.title, `%${search}%`))
-        : eq(chatSessions.userId, request.user.id);
+        ? and(ownership, ilike(chatSessions.title, `%${search}%`))
+        : ownership;
       const sessions = await db
         .select()
         .from(chatSessions)
@@ -55,9 +61,7 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const [session] = await db
         .select()
         .from(chatSessions)
-        .where(
-          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
-        )
+        .where(and(eq(chatSessions.id, request.params.id), chatSessionOwnershipCondition(request)))
         .limit(1);
       if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
 
@@ -84,9 +88,7 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const [session] = await db
         .update(chatSessions)
         .set({ title: request.body.title, updatedAt: new Date() })
-        .where(
-          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
-        )
+        .where(and(eq(chatSessions.id, request.params.id), chatSessionOwnershipCondition(request)))
         .returning();
       if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
 
@@ -104,9 +106,7 @@ export const chatSessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const [session] = await db
         .select()
         .from(chatSessions)
-        .where(
-          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
-        )
+        .where(and(eq(chatSessions.id, request.params.id), chatSessionOwnershipCondition(request)))
         .limit(1);
       if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
 
