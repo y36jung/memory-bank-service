@@ -114,7 +114,7 @@ describe('SSE CORS origin guard — POST /chat/sessions/:id/messages (sse-cors-o
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it("an allowed Origin gets access-control-allow-credentials: true — required for the demo account's demo_device_id cookie to round-trip cross-origin on this route", async () => {
+  it('an allowed Origin gets access-control-allow-credentials: true — required for the refresh_token cookie to round-trip cross-origin on this route', async () => {
     const user = await seedUser('cors-owner-credentials');
     const session = await seedChatSession(user.id);
     const token = signHS256({ sub: user.id }, env.JWT_SECRET);

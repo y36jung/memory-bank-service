@@ -27,7 +27,7 @@ import { env } from '../../src/config/env.js';
 import { pool } from '../../src/db/index.js';
 import { redisConnection } from '../../src/queue/index.js';
 import { assertDemoDailyLimitNotExceeded } from '../../src/lib/demoLimit.js';
-import { DEMO_DEVICE_COOKIE_NAME } from '../../src/plugins/auth.js';
+import { DEMO_DEVICE_HEADER_NAME } from '../../src/plugins/auth.js';
 
 function todayKey(): string {
   const day = new Date().toISOString().slice(0, 10);
@@ -63,8 +63,7 @@ describe('global daily message cap on the shared demo account', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/api/chat/sessions/${session.id}/messages`,
-        headers: { authorization: `Bearer ${token}` },
-        cookies: { [DEMO_DEVICE_COOKIE_NAME]: deviceId },
+        headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: deviceId },
         payload: { message: 'hello' },
       });
 
@@ -86,8 +85,10 @@ describe('global daily message cap on the shared demo account', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/api/chat/sessions/${bogusSessionId}/messages`,
-        headers: { authorization: `Bearer ${token}` },
-        cookies: { [DEMO_DEVICE_COOKIE_NAME]: 'irrelevant-device' },
+        headers: {
+          authorization: `Bearer ${token}`,
+          [DEMO_DEVICE_HEADER_NAME]: 'irrelevant-device',
+        },
         payload: { message: 'hello' },
       });
 

@@ -56,6 +56,7 @@ export async function buildTestApp() {
   await app.register(cors, {
     origin: [...CORS_ALLOWED_ORIGINS],
     credentials: true,
+    exposedHeaders: ['x-demo-device-id'],
   });
 
   // Root plugins — both the public and protected zones need cookie read/write
