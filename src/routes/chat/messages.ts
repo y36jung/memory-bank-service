@@ -6,6 +6,8 @@ import { chatSessions } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { streamChatResponse } from '../../services/chat.js';
 import { isAllowedOrigin } from '../../config/cors.js';
+import { chatSessionOwnershipCondition } from '../../lib/chatOwnership.js';
+import { assertDemoDailyLimitNotExceeded } from '../../lib/demoLimit.js';
 
 export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
@@ -20,11 +22,13 @@ export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
       const [session] = await db
         .select({ id: chatSessions.id })
         .from(chatSessions)
-        .where(
-          and(eq(chatSessions.id, request.params.id), eq(chatSessions.userId, request.user.id)),
-        )
+        .where(and(eq(chatSessions.id, request.params.id), chatSessionOwnershipCondition(request)))
         .limit(1);
       if (!session) throw new AppError('NOT_FOUND', 'Session not found', 404);
+
+      if (request.user.isDemo) {
+        await assertDemoDailyLimitNotExceeded();
+      }
 
       // @fastify/cors sets Access-Control-Allow-Origin in onSend, which fires after
       // the route handler — too late for SSE since we flush headers here directly.
@@ -33,6 +37,7 @@ export const chatMessageRoutes: FastifyPluginAsyncZod = async (app) => {
       const requestOrigin = request.headers.origin;
       if (isAllowedOrigin(requestOrigin)) {
         reply.raw.setHeader('Access-Control-Allow-Origin', requestOrigin);
+        reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
         reply.raw.setHeader('Vary', 'Origin');
       }
       reply.raw.setHeader('Content-Type', 'text/event-stream');

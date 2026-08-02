@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, lt, or } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { db } from './index.js';
 import { refreshTokens } from './schema.js';
@@ -133,4 +133,18 @@ export async function revokeRefreshTokenFamily(
     await revokeFamily(tx, row.id);
     return { revoked: true };
   });
+}
+
+/**
+ * Deletes dead refresh_tokens rows: expired, or already used (a used token
+ * is never valid again by design — rotation/reuse-detection is terminal for
+ * that row). Not demo-specific; keeps the table bounded for all users. Runs
+ * from src/services/cleanup.ts's hourly supervisor tick.
+ */
+export async function purgeExpiredRefreshTokens(): Promise<{ deletedCount: number }> {
+  const deleted = await db
+    .delete(refreshTokens)
+    .where(or(lt(refreshTokens.expiresAt, new Date()), eq(refreshTokens.isUsed, true)))
+    .returning({ id: refreshTokens.id });
+  return { deletedCount: deleted.length };
 }

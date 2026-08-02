@@ -23,6 +23,7 @@ import { signHS256 } from './helpers/jwt.js';
 import { env } from '../../src/config/env.js';
 import { pool } from '../../src/db/index.js';
 import { buildDocumentStorageKey, putObject, deleteObject } from '../../src/services/storage.js';
+import { DEMO_DEVICE_COOKIE_NAME } from '../../src/plugins/auth.js';
 
 describe('demo-account permission restrictions', () => {
   let app: FastifyInstance;
@@ -146,6 +147,11 @@ describe('demo-account permission restrictions', () => {
     it('create, rename, and delete a chat session', async () => {
       const { token } = await demoToken();
 
+      // The shared demo account scopes chat-session ownership by a
+      // per-browser demo_device_id cookie (src/plugins/auth.ts,
+      // src/lib/chatOwnership.ts) in addition to userId, so every call in
+      // this "same browser" flow must carry the same minted cookie value —
+      // see demo-device-scoping.test.ts for the cross-device behavior.
       const created = await app.inject({
         method: 'POST',
         url: '/api/chat/sessions',
@@ -154,11 +160,14 @@ describe('demo-account permission restrictions', () => {
       });
       expect(created.statusCode).toBe(201);
       const sessionId: string = created.json().data.id;
+      const deviceCookie = created.cookies.find((c) => c.name === DEMO_DEVICE_COOKIE_NAME);
+      if (!deviceCookie) throw new Error('expected a demo_device_id Set-Cookie on session create');
 
       const renamed = await app.inject({
         method: 'PATCH',
         url: `/api/chat/sessions/${sessionId}`,
         headers: { authorization: `Bearer ${token}` },
+        cookies: { [DEMO_DEVICE_COOKIE_NAME]: deviceCookie.value },
         payload: { title: 'Renamed by demo' },
       });
       expect(renamed.statusCode).toBe(200);
@@ -168,6 +177,7 @@ describe('demo-account permission restrictions', () => {
         method: 'DELETE',
         url: `/api/chat/sessions/${sessionId}`,
         headers: { authorization: `Bearer ${token}` },
+        cookies: { [DEMO_DEVICE_COOKIE_NAME]: deviceCookie.value },
       });
       expect(deleted.statusCode).toBe(200);
       expect(deleted.json()).toEqual({ data: { deleted: true }, error: null });

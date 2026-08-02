@@ -102,11 +102,19 @@ export const chatSessions = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // Per-browser scoping key for the shared demo account (isDemo === true
+    // users all share one userId). Null for regular users and for any
+    // pre-migration demo rows, which are then permanently unmatched by any
+    // device cookie — see src/lib/chatOwnership.ts.
+    deviceId: text('device_id'),
     title: text('title').notNull().default(DEFAULT_SESSION_TITLE),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
-  (table) => [index('chat_sessions_user_id_idx').on(table.userId)],
+  (table) => [
+    index('chat_sessions_user_id_idx').on(table.userId),
+    index('chat_sessions_user_device_idx').on(table.userId, table.deviceId),
+  ],
 );
 
 export const messages = pgTable('messages', {

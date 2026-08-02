@@ -60,7 +60,8 @@ export async function buildApp() {
       hook: 'preHandler',
       max: 100,
       timeWindow: '1 minute',
-      keyGenerator: (req) => req.user?.id ?? req.ip,
+      keyGenerator: (req) =>
+        req.user?.isDemo ? `demo:${req.demoDeviceId ?? req.ip}` : (req.user?.id ?? req.ip),
       errorResponseBuilder: rateLimitEnvelope,
     });
     await protectedScope.register(documentUploadRoutes, { prefix: '/api' });
@@ -88,6 +89,10 @@ export async function start() {
   const supervisorHandle = (startSupervisor as () => ReturnType<typeof setInterval>)();
   console.log('Ingestion supervisor started');
 
+  const { startCleanupSupervisor } = await import('./services/cleanup.js');
+  const cleanupSupervisorHandle = startCleanupSupervisor();
+  console.log('Cleanup supervisor started');
+
   // Side-effect: starts the BullMQ worker.
   await import('./queue/workers/ingestion.worker.js');
   console.log('Ingestion worker started');
@@ -97,6 +102,7 @@ export async function start() {
   const shutdown = async () => {
     await app.close();
     clearInterval(supervisorHandle);
+    clearInterval(cleanupSupervisorHandle);
     process.exit(0);
   };
   process.on('SIGTERM', shutdown);

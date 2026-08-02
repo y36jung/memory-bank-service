@@ -18,6 +18,9 @@ const envSchema = z
     JWT_SECRET: z.string().min(32),
     REGISTRATION_SECRET: z.string().optional(),
     MAX_FILE_SIZE_BYTES: z.coerce.number().default(524_288_000),
+    // Global (cross-visitor) daily cap on shared demo-account chat messages —
+    // caps OpenAI spend regardless of how many concurrent demo devices there are.
+    DEMO_DAILY_MESSAGE_LIMIT: z.coerce.number().default(200),
     MEDIA_EXTRACT_TIMEOUT_MS: z.coerce.number().default(600_000),
     VISION_TIMEOUT_MS: z.coerce.number().default(60_000),
     WHISPER_TIMEOUT_MS: z.coerce.number().default(120_000),

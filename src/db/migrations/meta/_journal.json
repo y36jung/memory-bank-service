@@ -64,6 +64,13 @@
       "when": 1785361426797,
       "tag": "0008_remove-legacy-user",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785644984430,
+      "tag": "0009_keen_hammerhead",
+      "breakpoints": true
     }
   ]
 }

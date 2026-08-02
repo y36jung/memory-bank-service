@@ -71,7 +71,8 @@ export async function buildTestApp() {
       hook: 'preHandler',
       max: 100,
       timeWindow: '1 minute',
-      keyGenerator: (req) => req.user?.id ?? req.ip,
+      keyGenerator: (req) =>
+        req.user?.isDemo ? `demo:${req.demoDeviceId ?? req.ip}` : (req.user?.id ?? req.ip),
       errorResponseBuilder: rateLimitEnvelope,
     });
     await protectedScope.register(documentUploadRoutes, { prefix: '/api' });
