@@ -41,7 +41,7 @@ export const refreshRoute: FastifyPluginAsyncZod = async (app) => {
     switch (result.status) {
       case 'rotated': {
         const [user] = await db
-          .select({ isDemo: users.isDemo })
+          .select({ email: users.email, isDemo: users.isDemo })
           .from(users)
           .where(eq(users.id, result.userId))
           .limit(1);
@@ -50,7 +50,10 @@ export const refreshRoute: FastifyPluginAsyncZod = async (app) => {
           { expiresIn: '15m' },
         );
         reply.setCookie(REFRESH_COOKIE_NAME, newRaw, REFRESH_COOKIE_OPTIONS);
-        sendSuccess(reply, { accessToken });
+        sendSuccess(reply, {
+          user: { id: result.userId, email: user?.email ?? '' },
+          accessToken,
+        });
         break;
       }
       case 'reuse_detected':
