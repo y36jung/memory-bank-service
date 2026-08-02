@@ -2,7 +2,7 @@
  * Cross-DEVICE scoping on the shared demo account (src/plugins/auth.ts,
  * src/lib/chatOwnership.ts). Every demo visitor shares one userId, so
  * ownership.test.ts's cross-USER coverage doesn't protect them from each
- * other. This file proves the per-browser demo_device_id cookie keeps
+ * other. This file proves the per-browser demo_device_id header keeps
  * concurrent demo visitors' chat sessions isolated the same way real users
  * are isolated from each other.
  *
@@ -16,10 +16,11 @@ import { seedUser, seedChatSession } from './helpers/seed.js';
 import { signHS256 } from './helpers/jwt.js';
 import { env } from '../../src/config/env.js';
 import { pool } from '../../src/db/index.js';
-import { DEMO_DEVICE_COOKIE_NAME } from '../../src/plugins/auth.js';
+import { DEMO_DEVICE_HEADER_NAME } from '../../src/plugins/auth.js';
 
-function getDemoDeviceCookie(res: LightMyRequestResponse) {
-  return res.cookies.find((c) => c.name === DEMO_DEVICE_COOKIE_NAME);
+function getDemoDeviceHeader(res: LightMyRequestResponse): string | undefined {
+  const value = res.headers[DEMO_DEVICE_HEADER_NAME];
+  return typeof value === 'string' ? value : undefined;
 }
 
 describe('demo-account cross-device chat scoping', () => {
@@ -39,41 +40,37 @@ describe('demo-account cross-device chat scoping', () => {
     return { user, token: signHS256({ sub: user.id, isDemo: true }, env.JWT_SECRET) };
   }
 
-  /** Drives one call with no demo_device_id cookie and returns the minted value. */
-  async function mintDevice(token: string) {
+  /** Drives one call with no demo_device_id header and returns the minted value. */
+  async function mintDevice(token: string): Promise<string> {
     const res = await app.inject({
       method: 'GET',
       url: '/api/chat/sessions',
       headers: { authorization: `Bearer ${token}` },
     });
-    const cookie = getDemoDeviceCookie(res);
-    if (!cookie) throw new Error('mintDevice: no demo_device_id Set-Cookie on response');
-    return cookie;
+    const deviceId = getDemoDeviceHeader(res);
+    if (!deviceId) throw new Error('mintDevice: no x-demo-device-id response header');
+    return deviceId;
   }
 
-  it('a fresh demo request with no cookie gets a minted demo_device_id cookie (httpOnly, path=/, sameSite=Lax)', async () => {
+  it('a fresh demo request with no header gets a minted x-demo-device-id response header', async () => {
     const { token } = await demoToken();
-    const cookie = await mintDevice(token);
-    expect(cookie.path).toBe('/');
-    expect(cookie.httpOnly).toBe(true);
-    expect(cookie.sameSite).toBe('Lax');
-    expect(cookie.value).toBeTruthy();
+    const deviceId = await mintDevice(token);
+    expect(deviceId).toBeTruthy();
   });
 
-  it('a request that already carries the cookie does not get re-minted a new one', async () => {
+  it('a request that already carries the header does not get re-minted a new one', async () => {
     const { token } = await demoToken();
     const first = await mintDevice(token);
 
     const second = await app.inject({
       method: 'GET',
       url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: first.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: first },
     });
-    expect(getDemoDeviceCookie(second)).toBeUndefined();
+    expect(getDemoDeviceHeader(second)).toBeUndefined();
   });
 
-  it('a non-demo user never gets a demo_device_id cookie', async () => {
+  it('a non-demo user never gets a demo_device_id header', async () => {
     const user = await seedUser('regular-device');
     const token = signHS256({ sub: user.id, isDemo: false }, env.JWT_SECRET);
     const res = await app.inject({
@@ -81,20 +78,19 @@ describe('demo-account cross-device chat scoping', () => {
       url: '/api/chat/sessions',
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(getDemoDeviceCookie(res)).toBeUndefined();
+    expect(getDemoDeviceHeader(res)).toBeUndefined();
   });
 
   it("two concurrent demo visitors (same account, different devices) cannot see, rename, or delete each other's sessions", async () => {
     const { token } = await demoToken();
     const visitor1 = await mintDevice(token);
     const visitor2 = await mintDevice(token);
-    expect(visitor2.value).not.toBe(visitor1.value);
+    expect(visitor2).not.toBe(visitor1);
 
     const created = await app.inject({
       method: 'POST',
       url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor1.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor1 },
       payload: {},
     });
     expect(created.statusCode).toBe(201);
@@ -104,16 +100,14 @@ describe('demo-account cross-device chat scoping', () => {
     const get2 = await app.inject({
       method: 'GET',
       url: `/api/chat/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor2.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor2 },
     });
     expect(get2.statusCode).toBe(404);
 
     const patch2 = await app.inject({
       method: 'PATCH',
       url: `/api/chat/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor2.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor2 },
       payload: { title: 'hijacked' },
     });
     expect(patch2.statusCode).toBe(404);
@@ -121,8 +115,7 @@ describe('demo-account cross-device chat scoping', () => {
     const delete2 = await app.inject({
       method: 'DELETE',
       url: `/api/chat/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor2.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor2 },
     });
     expect(delete2.statusCode).toBe(404);
 
@@ -130,8 +123,7 @@ describe('demo-account cross-device chat scoping', () => {
     const list2 = await app.inject({
       method: 'GET',
       url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor2.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor2 },
     });
     const list2Ids: string[] = list2.json().data.map((s: { id: string }) => s.id);
     expect(list2Ids).not.toContain(sessionId);
@@ -140,8 +132,7 @@ describe('demo-account cross-device chat scoping', () => {
     const get1 = await app.inject({
       method: 'GET',
       url: `/api/chat/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor1.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor1 },
     });
     expect(get1.statusCode).toBe(200);
     expect(get1.json().data.title).not.toBe('hijacked');
@@ -149,8 +140,7 @@ describe('demo-account cross-device chat scoping', () => {
     const rename1 = await app.inject({
       method: 'PATCH',
       url: `/api/chat/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor1.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor1 },
       payload: { title: 'renamed by owner' },
     });
     expect(rename1.statusCode).toBe(200);
@@ -158,8 +148,7 @@ describe('demo-account cross-device chat scoping', () => {
     const delete1 = await app.inject({
       method: 'DELETE',
       url: `/api/chat/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor1.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor1 },
     });
     expect(delete1.statusCode).toBe(200);
   });
@@ -172,16 +161,14 @@ describe('demo-account cross-device chat scoping', () => {
     const get = await app.inject({
       method: 'GET',
       url: `/api/chat/sessions/${orphan.id}`,
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor },
     });
     expect(get.statusCode).toBe(404);
 
     const list = await app.inject({
       method: 'GET',
       url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: visitor.value },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: visitor },
     });
     const listIds: string[] = list.json().data.map((s: { id: string }) => s.id);
     expect(listIds).not.toContain(orphan.id);

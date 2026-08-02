@@ -16,7 +16,17 @@
  * No mocks: this exercises the real module under real env-var values.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { CORS_ALLOWED_ORIGINS, isAllowedOrigin } from '../../../src/config/cors.js';
+import type { FastifyRequest } from 'fastify';
+import {
+  CORS_ALLOWED_ORIGINS,
+  isAllowedOrigin,
+  assertTrustedOrigin,
+} from '../../../src/config/cors.js';
+import { AppError } from '../../../src/lib/errors.js';
+
+function requestWithOrigin(origin: string | undefined): FastifyRequest {
+  return { headers: origin === undefined ? {} : { origin } } as FastifyRequest;
+}
 
 const ORIGINAL_NODE_ENV = process.env['NODE_ENV'];
 const ORIGINAL_REGISTRATION_SECRET = process.env['REGISTRATION_SECRET'];
@@ -50,6 +60,21 @@ describe('src/config/cors.ts', () => {
 
     it('isAllowedOrigin returns false for a missing Origin (undefined)', () => {
       expect(isAllowedOrigin(undefined)).toBe(false);
+    });
+
+    it('assertTrustedOrigin does not throw when Origin is absent (fails open on missing)', () => {
+      expect(() => assertTrustedOrigin(requestWithOrigin(undefined))).not.toThrow();
+    });
+
+    it('assertTrustedOrigin throws AppError("FORBIDDEN", 403) when Origin is present and not allow-listed', () => {
+      try {
+        assertTrustedOrigin(requestWithOrigin('https://evil.example'));
+        expect.unreachable('assertTrustedOrigin should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AppError);
+        expect((err as AppError).code).toBe('FORBIDDEN');
+        expect((err as AppError).statusCode).toBe(403);
+      }
     });
   });
 
@@ -125,6 +150,16 @@ describe('src/config/cors.ts', () => {
       process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
       const mod = await import('../../../src/config/cors.js');
       expect(mod.isAllowedOrigin(undefined)).toBe(false);
+    });
+
+    it('assertTrustedOrigin does not throw when Origin matches the allow-list', async () => {
+      vi.resetModules();
+      process.env['NODE_ENV'] = 'beta';
+      process.env['REGISTRATION_SECRET'] = 'test-registration-secret';
+      const mod = await import('../../../src/config/cors.js');
+      expect(() =>
+        mod.assertTrustedOrigin(requestWithOrigin('https://memory-bank-ui.vercel.app')),
+      ).not.toThrow();
     });
   });
 });

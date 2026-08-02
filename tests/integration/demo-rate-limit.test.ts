@@ -20,12 +20,13 @@ import { seedUser } from './helpers/seed.js';
 import { signHS256 } from './helpers/jwt.js';
 import { env } from '../../src/config/env.js';
 import { pool } from '../../src/db/index.js';
-import { DEMO_DEVICE_COOKIE_NAME } from '../../src/plugins/auth.js';
+import { DEMO_DEVICE_HEADER_NAME } from '../../src/plugins/auth.js';
 
 const PROTECTED_LIMIT = 100; // matches src/server.ts's rateLimit max
 
-function getDemoDeviceCookie(res: LightMyRequestResponse) {
-  return res.cookies.find((c) => c.name === DEMO_DEVICE_COOKIE_NAME);
+function getDemoDeviceHeader(res: LightMyRequestResponse): string | undefined {
+  const value = res.headers[DEMO_DEVICE_HEADER_NAME];
+  return typeof value === 'string' ? value : undefined;
 }
 
 describe('per-device rate limiting for the shared demo account', () => {
@@ -51,9 +52,9 @@ describe('per-device rate limiting for the shared demo account', () => {
       url: '/api/chat/sessions',
       headers: { authorization: `Bearer ${token}` },
     });
-    const cookie = getDemoDeviceCookie(res);
-    if (!cookie) throw new Error('mintDevice: no demo_device_id Set-Cookie on response');
-    return cookie.value;
+    const deviceId = getDemoDeviceHeader(res);
+    if (!deviceId) throw new Error('mintDevice: no x-demo-device-id response header');
+    return deviceId;
   }
 
   it("exhausting one demo device's bucket does not 429 a second concurrent demo device on the same account", async () => {
@@ -67,8 +68,7 @@ describe('per-device rate limiting for the shared demo account', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/chat/sessions',
-        headers: { authorization: `Bearer ${token}` },
-        cookies: { [DEMO_DEVICE_COOKIE_NAME]: device1 },
+        headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: device1 },
       });
       expect(res.statusCode).not.toBe(429);
     }
@@ -77,8 +77,7 @@ describe('per-device rate limiting for the shared demo account', () => {
     const overLimit = await app.inject({
       method: 'GET',
       url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: device1 },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: device1 },
     });
     expect(overLimit.statusCode).toBe(429);
     expect(overLimit.json()).toEqual({
@@ -90,8 +89,7 @@ describe('per-device rate limiting for the shared demo account', () => {
     const device2Call = await app.inject({
       method: 'GET',
       url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}` },
-      cookies: { [DEMO_DEVICE_COOKIE_NAME]: device2 },
+      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: device2 },
     });
     expect(device2Call.statusCode).not.toBe(429);
   }, 30_000);
@@ -105,6 +103,6 @@ describe('per-device rate limiting for the shared demo account', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.statusCode).not.toBe(429);
-    expect(getDemoDeviceCookie(res)).toBeUndefined();
+    expect(getDemoDeviceHeader(res)).toBeUndefined();
   });
 });

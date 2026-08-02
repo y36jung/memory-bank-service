@@ -10,12 +10,13 @@ import {
   hashRefreshToken,
 } from '../../lib/refreshToken.js';
 import { sendSuccess, AppError } from '../../lib/errors.js';
+import { assertTrustedOrigin } from '../../config/cors.js';
 import { env } from '../../config/env.js';
 
 // §3.1-B: cookie path is the minimal common prefix of /refresh and /logout.
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
-  sameSite: 'lax' as const,
+  sameSite: env.NODE_ENV === 'beta' ? ('none' as const) : ('lax' as const),
   secure: env.NODE_ENV === 'beta',
   path: '/api/auth',
   maxAge: REFRESH_TOKEN_TTL_MS / 1000, // @fastify/cookie maxAge is seconds
@@ -24,6 +25,7 @@ const REFRESH_COOKIE_OPTIONS = {
 // Not rate-limited (per-IP tier scopes to login/register only, §5.11).
 export const refreshRoute: FastifyPluginAsyncZod = async (app) => {
   app.post('/refresh', async (request, reply) => {
+    assertTrustedOrigin(request);
     const raw = request.cookies[REFRESH_COOKIE_NAME];
     if (!raw) {
       throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401);

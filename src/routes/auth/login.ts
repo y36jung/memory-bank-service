@@ -18,7 +18,7 @@ import { env } from '../../config/env.js';
 // §3.1-B: cookie path is the minimal common prefix of /refresh and /logout.
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
-  sameSite: 'lax' as const,
+  sameSite: env.NODE_ENV === 'beta' ? ('none' as const) : ('lax' as const),
   secure: env.NODE_ENV === 'beta',
   path: '/api/auth',
   maxAge: REFRESH_TOKEN_TTL_MS / 1000, // @fastify/cookie maxAge is seconds
