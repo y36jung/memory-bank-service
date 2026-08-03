@@ -26,6 +26,10 @@
  * AC-BACKOFF-3: even the floor tier has no hits → chunks: [], lowConfidence: false
  * AC-BACKOFF-4: searchPoints is called exactly once, always at the floor threshold —
  *               backoff tiers are applied in process, not via re-querying Qdrant
+ * AC-RERANK-CONF-1: primary vector tier clears but the top reranked chunk scores below
+ *                    RERANK_LOW_CONFIDENCE_THRESHOLD → lowConfidence: true
+ * AC-RERANK-CONF-2: vector backoff already set lowConfidence: true; a high top rerank
+ *                    score does not clear it back to false (OR, not overwrite)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -777,5 +781,66 @@ describe('AC-BACKOFF: retrieve() — score-threshold backoff', () => {
 
     expect(qdrant.searchPoints).toHaveBeenCalledTimes(1);
     expect(qdrant.searchPoints).toHaveBeenCalledWith(TEST_USER_ID, MOCK_VECTOR, 30, 0.05);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-RERANK-CONF: post-rerank low-confidence signal (independent of AC-BACKOFF)
+// ---------------------------------------------------------------------------
+
+describe('AC-RERANK-CONF: retrieve() — post-rerank low-confidence', () => {
+  const rerankConfDbRow = {
+    id: 'chunk-pg-id-2',
+    qdrantId: 'qdrant-uuid-2',
+    documentId: 'doc-id-2',
+    content: 'chunk content',
+    originalName: 'doc.txt',
+    createdAt: new Date(),
+    sourceType: 'upload',
+    mimeType: 'text/plain',
+    sizeBytes: null,
+    startSecs: null,
+    endSecs: null,
+  };
+
+  it('AC-RERANK-CONF-1: primary vector tier clears but a weak top rerank score sets lowConfidence: true', async () => {
+    // Strong vector score — no backoff needed, vectorLowConfidence would be false.
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-2', score: 0.9 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([rerankConfDbRow]) as unknown as ReturnType<typeof db.select>,
+    );
+    // Override the default passthrough rerank mock: Cohere finds the raw query
+    // doesn't actually match this chunk well, despite the strong vector score.
+    vi.mocked(rerankerModule.rerank).mockImplementation(
+      async (_query: string, chunks: RetrievedChunk[], topN: number) =>
+        chunks.slice(0, topN).map((c) => ({ ...c, score: 0.1 })),
+    );
+
+    const result = await retrieve(TEST_USER_ID, 'query');
+
+    expect(result.type).toBe('chunk_results');
+    if (result.type === 'chunk_results') {
+      expect(result.lowConfidence).toBe(true);
+    }
+  });
+
+  it('AC-RERANK-CONF-2: vector backoff already sets lowConfidence: true; a high top rerank score does not clear it', async () => {
+    // Same tier as AC-BACKOFF-2: clears only 0.1, not the 0.2 primary tier —
+    // vectorLowConfidence is true on its own.
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-2', score: 0.12 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([rerankConfDbRow]) as unknown as ReturnType<typeof db.select>,
+    );
+    vi.mocked(rerankerModule.rerank).mockImplementation(
+      async (_query: string, chunks: RetrievedChunk[], topN: number) =>
+        chunks.slice(0, topN).map((c) => ({ ...c, score: 0.95 })),
+    );
+
+    const result = await retrieve(TEST_USER_ID, 'query');
+
+    expect(result.type).toBe('chunk_results');
+    if (result.type === 'chunk_results') {
+      expect(result.lowConfidence).toBe(true);
+    }
   });
 });

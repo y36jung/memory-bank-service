@@ -40,7 +40,15 @@ export interface RetrievedDocument {
 
 export type RetrievalResult =
   | { type: 'document_list'; documents: RetrievedDocument[] }
-  | { type: 'chunk_results'; chunks: RetrievedChunk[]; lowConfidence: boolean };
+  | {
+      type: 'chunk_results';
+      chunks: RetrievedChunk[];
+      // True if either the pre-rank vector search needed to back off below its
+      // primary score threshold, or the post-rank top chunk score is below
+      // RERANK_LOW_CONFIDENCE_THRESHOLD. Two independent triggers, OR'd — see
+      // SCORE_FLOOR / RERANK_LOW_CONFIDENCE_THRESHOLD.
+      lowConfidence: boolean;
+    };
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -57,7 +65,18 @@ const MIN_RERANK_CANDIDATE_POOL = 20;
 // (lowest-acceptable) threshold; the primary threshold and any backoff tiers
 // in between are then applied in process against that single result set, so
 // backing off never costs an extra round trip.
+//
+// This is one of two independent low-confidence triggers (see
+// RERANK_LOW_CONFIDENCE_THRESHOLD below for the other). Either one firing is
+// enough to mark a result low-confidence — neither can cancel the other out.
 const SCORE_FLOOR = 0.05;
+
+// Below this, even the best-matching reranked chunk doesn't clearly relate to
+// the raw query per Cohere's cross-encoder (the only score in this pipeline
+// computed against the real query text, not the HyDE hypothetical answer).
+// A starting value, not empirically tuned — revisit once production
+// relevance_score distributions are available.
+const RERANK_LOW_CONFIDENCE_THRESHOLD = 0.3;
 
 /**
  * Builds a descending list of score thresholds from `primary` down to
@@ -370,7 +389,7 @@ export async function retrieve(
   if (vectorChunksOrNull === null) {
     return { type: 'chunk_results', chunks: [], lowConfidence: false };
   }
-  const { chunks: vectorChunks, lowConfidence } = vectorChunksOrNull;
+  const { chunks: vectorChunks, lowConfidence: vectorLowConfidence } = vectorChunksOrNull;
 
   // If no metadata filters, candidates are the vector results as-is (order
   // doesn't matter — rerank() below re-sorts).
@@ -411,6 +430,15 @@ export async function retrieve(
   // Final step: rerank the candidate pool with the local cross-encoder and
   // truncate to topK. Reranks against the raw query, not the HyDE text.
   const rerankedChunks = await timed('rerank total', () => rerank(query, candidates, topK));
+
+  // Second, independent low-confidence trigger: the best-matching chunk's
+  // Cohere score, checked against the raw query text rather than the HyDE
+  // hypothetical answer. Neither this nor vectorLowConfidence can cancel the
+  // other out — either one being weak is enough.
+  const topRerankScore = rerankedChunks[0]?.score ?? 0;
+  const rerankLowConfidence = topRerankScore < RERANK_LOW_CONFIDENCE_THRESHOLD;
+  const lowConfidence = vectorLowConfidence || rerankLowConfidence;
+
   return { type: 'chunk_results', chunks: rerankedChunks, lowConfidence };
 }
 

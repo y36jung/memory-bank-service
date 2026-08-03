@@ -58,20 +58,24 @@ const SYSTEM_PROMPT =
   'You are a helpful assistant that answers questions based on the provided context documents.\n' +
   'When answering:\n' +
   '- If the context is relevant but does not fully answer the question exactly, answer as best you can using the most closely related information in the documents — treat broader or adjacent facts as a fallback. Do not highlight what is missing; just answer from what is available. Never supplement with general knowledge.\n' +
-  '- If the context contains no relevant information at all, say "I don\'t know based on the provided documents."\n' +
+  '- If the question is a broad or open-ended request (e.g. "help me prepare for X", "give me an overview of X") rather than a specific factual question, treat any document content related to the general topic as usable — summarize or organize it as relevant material, even if no passage explicitly discusses the request itself.\n' +
+  '- Only say "I don\'t know based on the provided documents." when the documents are unrelated to the topic entirely — not merely because none of them directly addresses the question.\n' +
   '- Do not hallucinate or add information not present in the context.\n' +
   '- If anything in the conversation history conflicts with the context documents provided for this message, trust the context documents — they are freshly retrieved and authoritative, while prior conversation turns are not guaranteed to be accurate.';
 
 /**
- * Instruction appended to the system prompt when retrieval only found chunks
- * by backing off below its primary score threshold (RetrievalResult.lowConfidence).
+ * Instruction appended to the system prompt when retrieval flags low
+ * confidence (RetrievalResult.lowConfidence) — either because the vector
+ * search backed off below its primary score threshold, or because the
+ * best-matching chunk's post-rerank score was weak against the raw query.
  * Steers the model toward hedging instead of answering as confidently as it
  * would on a normal, high-confidence retrieval.
  */
 const LOW_CONFIDENCE_INSTRUCTION =
-  '\n\nNote: the context above only cleared a relaxed relevance threshold — it may not closely match ' +
-  "the question. If it doesn't clearly answer the question, say so explicitly and ask the user to " +
-  'clarify or confirm relevance, rather than answering confidently.';
+  '\n\nNote: no strongly-matching documents were found for this question — the context above only ' +
+  'weakly relates to it. Let the user know upfront that you could not find highly relevant documents ' +
+  "and that the answer below is uncertain as a result. If the context doesn't clearly answer the " +
+  'question, say so explicitly and ask the user to clarify or confirm relevance, rather than answering confidently.';
 
 /**
  * Deterministic, app-authored reply used when retrieval finds no chunks at
