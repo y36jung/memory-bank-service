@@ -1,6 +1,5 @@
 import fp from 'fastify-plugin';
 import { AppError } from '../lib/errors.js';
-import { generateRefreshToken } from '../lib/refreshToken.js';
 
 // fastifyJwt registration + the `declare module '@fastify/jwt'` augmentation
 // live in ./jwt.ts (registered at root). This plugin is registered inside
@@ -15,16 +14,19 @@ declare module 'fastify' {
   }
 }
 
-// Not a cookie: a plain header pair (request header in, response header out
-// on mint). Sidesteps SameSite/cross-site cookie delivery entirely — see
-// src/config/cors.ts's exposedHeaders for the corresponding CORS change
-// required for the frontend to read the response header.
+// Not a cookie: a plain request header. Sidesteps SameSite/cross-site cookie
+// delivery entirely. The frontend generates the value itself
+// (crypto.randomUUID(), cached to localStorage) and sends it on every
+// request — the backend is a pure consumer, it never mints one. A demo
+// request that arrives without it simply gets no demoDeviceId; see
+// src/lib/chatOwnership.ts for how that fails closed (no rows) rather than
+// leaking data across devices.
 export const DEMO_DEVICE_HEADER_NAME = 'x-demo-device-id';
 
 export const authPlugin = fp(async (app) => {
   app.decorateRequest('demoDeviceId', undefined);
 
-  app.addHook('preHandler', async (request, reply) => {
+  app.addHook('preHandler', async (request) => {
     try {
       await request.jwtVerify();
     } catch {
@@ -37,13 +39,6 @@ export const authPlugin = fp(async (app) => {
       const existing = request.headers[DEMO_DEVICE_HEADER_NAME];
       if (typeof existing === 'string' && existing.length > 0) {
         request.demoDeviceId = existing;
-      } else {
-        // generateRefreshToken() is just 32 random bytes, base64url — reused
-        // here purely as a random-id generator. Not hashed: unlike the
-        // refresh token this is a routing key, not a bearer credential.
-        const minted = generateRefreshToken();
-        request.demoDeviceId = minted;
-        reply.header(DEMO_DEVICE_HEADER_NAME, minted);
       }
     }
   });

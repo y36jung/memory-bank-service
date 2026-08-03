@@ -45,7 +45,6 @@ export async function buildApp() {
     origin: [...CORS_ALLOWED_ORIGINS],
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
-    exposedHeaders: ['x-demo-device-id'],
   });
 
   // Root plugins — both the public and protected zones need cookie read/write

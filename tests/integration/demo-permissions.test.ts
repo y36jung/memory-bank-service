@@ -150,20 +150,17 @@ describe('demo-account permission restrictions', () => {
       // The shared demo account scopes chat-session ownership by a
       // per-browser demo_device_id header (src/plugins/auth.ts,
       // src/lib/chatOwnership.ts) in addition to userId, so every call in
-      // this "same browser" flow must carry the same minted header value —
-      // see demo-device-scoping.test.ts for the cross-device behavior.
+      // this "same browser" flow must carry the same header value — see
+      // demo-device-scoping.test.ts for the cross-device behavior.
+      const deviceId = randomUUID();
       const created = await app.inject({
         method: 'POST',
         url: '/api/chat/sessions',
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: deviceId },
         payload: {},
       });
       expect(created.statusCode).toBe(201);
       const sessionId: string = created.json().data.id;
-      const deviceId = created.headers[DEMO_DEVICE_HEADER_NAME];
-      if (typeof deviceId !== 'string' || !deviceId) {
-        throw new Error('expected an x-demo-device-id response header on session create');
-      }
 
       const renamed = await app.inject({
         method: 'PATCH',
