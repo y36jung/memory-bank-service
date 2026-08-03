@@ -325,6 +325,8 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
    candidate on Render's constrained vCPU than on localhost, dominating
    end-to-end chat latency (rerank stage alone: ~7s vs. ~300ms for a
    comparable candidate count).
+   The top-ranked chunk's relevance score is also checked against
+   RERANK_LOW_CONFIDENCE_THRESHOLD (0.3) — see step 7's low-confidence note.
 
 6. Build context
    Concatenate top chunks with source attribution headers
@@ -338,9 +340,13 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
    Otherwise:
    System prompt: instructs the model to answer from context only,
                   and say "I don't know" when context is insufficient.
-                  When step 3 only cleared the backoff floor (low-confidence),
-                  an extra instruction tells the model to hedge and ask the
-                  user to clarify instead of answering confidently.
+                  Low-confidence has two independent triggers, either one
+                  sufficient on its own: step 3 only clearing the backoff
+                  floor (pre-rank), or step 5's top-ranked chunk scoring below
+                  RERANK_LOW_CONFIDENCE_THRESHOLD (post-rank, against the raw
+                  query rather than the HyDE text). When flagged, an extra
+                  instruction tells the model to hedge and ask the user to
+                  clarify instead of answering confidently.
    Messages: [system, ...chat history, user]
    History depth is dynamic, classified per-query from the current session only
    (never cross-session): 'recent' (last 6, the default) | 'full_session'

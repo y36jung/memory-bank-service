@@ -386,7 +386,7 @@ describe('AC-LOWCONF: low-confidence retrieval (score-threshold backoff) hedging
       messages: { role: string; content: string }[];
     };
     const systemMessage = callArgs.messages[0];
-    expect(systemMessage?.content).toContain('relaxed relevance threshold');
+    expect(systemMessage?.content).toContain('no strongly-matching documents were found');
 
     const events = sseEventsWritten(reply);
     const doneEvent = events.find((e) => e['type'] === 'done');
@@ -411,7 +411,7 @@ describe('AC-LOWCONF: low-confidence retrieval (score-threshold backoff) hedging
       messages: { role: string; content: string }[];
     };
     const systemMessage = callArgs.messages[0];
-    expect(systemMessage?.content).not.toContain('relaxed relevance threshold');
+    expect(systemMessage?.content).not.toContain('no strongly-matching documents were found');
 
     const events = sseEventsWritten(reply);
     const doneEvent = events.find((e) => e['type'] === 'done');
