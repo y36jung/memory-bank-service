@@ -6,22 +6,22 @@
  * concurrent demo visitors' chat sessions isolated the same way real users
  * are isolated from each other.
  *
+ * The frontend generates demo_device_id client-side and the backend is a
+ * pure consumer (see src/plugins/auth.ts) — these tests mint their own ids
+ * with randomUUID() to stand in for that.
+ *
  * Runs against a real Fastify app (helpers/buildTestApp.ts) and real
  * Postgres — no mocks.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import { randomUUID } from 'node:crypto';
+import type { FastifyInstance } from 'fastify';
 import { buildTestApp } from './helpers/buildTestApp.js';
 import { seedUser, seedChatSession } from './helpers/seed.js';
 import { signHS256 } from './helpers/jwt.js';
 import { env } from '../../src/config/env.js';
 import { pool } from '../../src/db/index.js';
 import { DEMO_DEVICE_HEADER_NAME } from '../../src/plugins/auth.js';
-
-function getDemoDeviceHeader(res: LightMyRequestResponse): string | undefined {
-  const value = res.headers[DEMO_DEVICE_HEADER_NAME];
-  return typeof value === 'string' ? value : undefined;
-}
 
 describe('demo-account cross-device chat scoping', () => {
   let app: FastifyInstance;
@@ -40,37 +40,20 @@ describe('demo-account cross-device chat scoping', () => {
     return { user, token: signHS256({ sub: user.id, isDemo: true }, env.JWT_SECRET) };
   }
 
-  /** Drives one call with no demo_device_id header and returns the minted value. */
-  async function mintDevice(token: string): Promise<string> {
+  it('a demo request with no device header sees no sessions (fails closed, not unscoped)', async () => {
+    const { user, token } = await demoToken();
+    await seedChatSession(user.id, { deviceId: randomUUID() });
+
     const res = await app.inject({
       method: 'GET',
       url: '/api/chat/sessions',
       headers: { authorization: `Bearer ${token}` },
     });
-    const deviceId = getDemoDeviceHeader(res);
-    if (!deviceId) throw new Error('mintDevice: no x-demo-device-id response header');
-    return deviceId;
-  }
-
-  it('a fresh demo request with no header gets a minted x-demo-device-id response header', async () => {
-    const { token } = await demoToken();
-    const deviceId = await mintDevice(token);
-    expect(deviceId).toBeTruthy();
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([]);
   });
 
-  it('a request that already carries the header does not get re-minted a new one', async () => {
-    const { token } = await demoToken();
-    const first = await mintDevice(token);
-
-    const second = await app.inject({
-      method: 'GET',
-      url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}`, [DEMO_DEVICE_HEADER_NAME]: first },
-    });
-    expect(getDemoDeviceHeader(second)).toBeUndefined();
-  });
-
-  it('a non-demo user never gets a demo_device_id header', async () => {
+  it('a non-demo user is unaffected by the device header mechanism entirely', async () => {
     const user = await seedUser('regular-device');
     const token = signHS256({ sub: user.id, isDemo: false }, env.JWT_SECRET);
     const res = await app.inject({
@@ -78,14 +61,14 @@ describe('demo-account cross-device chat scoping', () => {
       url: '/api/chat/sessions',
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(getDemoDeviceHeader(res)).toBeUndefined();
+    expect(res.statusCode).toBe(200);
+    expect(res.headers[DEMO_DEVICE_HEADER_NAME]).toBeUndefined();
   });
 
   it("two concurrent demo visitors (same account, different devices) cannot see, rename, or delete each other's sessions", async () => {
     const { token } = await demoToken();
-    const visitor1 = await mintDevice(token);
-    const visitor2 = await mintDevice(token);
-    expect(visitor2).not.toBe(visitor1);
+    const visitor1 = randomUUID();
+    const visitor2 = randomUUID();
 
     const created = await app.inject({
       method: 'POST',
@@ -156,7 +139,7 @@ describe('demo-account cross-device chat scoping', () => {
   it('a pre-migration row with deviceId = null is invisible to every demo device', async () => {
     const { user, token } = await demoToken();
     const orphan = await seedChatSession(user.id, { deviceId: null });
-    const visitor = await mintDevice(token);
+    const visitor = randomUUID();
 
     const get = await app.inject({
       method: 'GET',

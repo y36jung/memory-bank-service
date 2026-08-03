@@ -14,7 +14,8 @@
  * Postgres — no mocks.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { buildTestApp } from './helpers/buildTestApp.js';
 import { seedUser } from './helpers/seed.js';
 import { signHS256 } from './helpers/jwt.js';
@@ -23,11 +24,6 @@ import { pool } from '../../src/db/index.js';
 import { DEMO_DEVICE_HEADER_NAME } from '../../src/plugins/auth.js';
 
 const PROTECTED_LIMIT = 100; // matches src/server.ts's rateLimit max
-
-function getDemoDeviceHeader(res: LightMyRequestResponse): string | undefined {
-  const value = res.headers[DEMO_DEVICE_HEADER_NAME];
-  return typeof value === 'string' ? value : undefined;
-}
 
 describe('per-device rate limiting for the shared demo account', () => {
   let app: FastifyInstance;
@@ -46,25 +42,13 @@ describe('per-device rate limiting for the shared demo account', () => {
     return { user, token: signHS256({ sub: user.id, isDemo: true }, env.JWT_SECRET) };
   }
 
-  async function mintDevice(token: string) {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/chat/sessions',
-      headers: { authorization: `Bearer ${token}` },
-    });
-    const deviceId = getDemoDeviceHeader(res);
-    if (!deviceId) throw new Error('mintDevice: no x-demo-device-id response header');
-    return deviceId;
-  }
-
   it("exhausting one demo device's bucket does not 429 a second concurrent demo device on the same account", async () => {
     const { token } = await demoToken();
-    const device1 = await mintDevice(token); // consumes 1 of device1's 100
-    const device2 = await mintDevice(token); // consumes 1 of device2's 100 (independent key)
-    expect(device2).not.toBe(device1);
+    const device1 = randomUUID();
+    const device2 = randomUUID(); // independent key from device1
 
-    // Drive device1 to exactly its limit (99 more calls -> 100 total).
-    for (let i = 0; i < PROTECTED_LIMIT - 1; i++) {
+    // Drive device1 to exactly its limit (100 calls -> 100 total).
+    for (let i = 0; i < PROTECTED_LIMIT; i++) {
       const res = await app.inject({
         method: 'GET',
         url: '/api/chat/sessions',
@@ -103,6 +87,6 @@ describe('per-device rate limiting for the shared demo account', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.statusCode).not.toBe(429);
-    expect(getDemoDeviceHeader(res)).toBeUndefined();
+    expect(res.headers[DEMO_DEVICE_HEADER_NAME]).toBeUndefined();
   });
 });
