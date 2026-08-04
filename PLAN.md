@@ -32,18 +32,18 @@ Email (Gmail, Outlook) and cloud file (Google Drive, OneDrive) ingestion via OAu
 
 ## Hosting & Deployment
 
-The public `NODE_ENV=beta` deployment runs on six managed platforms, one per concern, all on free tiers except S3:
+The public `NODE_ENV=beta` deployment runs on five managed platforms across six concerns (Render covers two), all on free tiers except S3:
 
-| Concern              | Platform     | Notes                                                                                                                                                                                                       |
-| -------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend API + worker | Render       | Single Node.js web service; the Fastify server and the in-process BullMQ worker both run from the one `src/server.ts` entrypoint (see [Project Structure](#project-structure)) — no separate worker service |
-| Frontend             | Vercel       | Next.js UI at `memory-bank-ui.vercel.app`; the only origin (plus localhost, for local-frontend-against-beta-API testing) allowed by the CORS allow-list in beta (`src/config/cors.ts`)                      |
-| Primary DB           | Neon         | Managed Postgres, free tier                                                                                                                                                                                 |
-| Vector Store         | Qdrant Cloud | Managed Qdrant, free tier                                                                                                                                                                                   |
-| Job Queue backing    | Upstash      | Managed Redis, free tier, used by BullMQ                                                                                                                                                                    |
-| Object Storage       | AWS S3       | Raw file storage; the only paid service                                                                                                                                                                     |
+| Concern              | Platform         | Notes                                                                                                                                                                                                       |
+| -------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend API + worker | Render           | Single Node.js web service; the Fastify server and the in-process BullMQ worker both run from the one `src/server.ts` entrypoint (see [Project Structure](#project-structure)) — no separate worker service |
+| Frontend             | Vercel           | Next.js UI at `memory-bank-ui.vercel.app`; the only origin (plus localhost, for local-frontend-against-beta-API testing) allowed by the CORS allow-list in beta (`src/config/cors.ts`)                      |
+| Primary DB           | Neon             | Managed Postgres, free tier                                                                                                                                                                                 |
+| Vector Store         | Qdrant Cloud     | Managed Qdrant, free tier                                                                                                                                                                                   |
+| Job Queue backing    | Render Key Value | Managed Redis-compatible (Valkey) instance, free tier, used by BullMQ; replaced Upstash to avoid its monthly Redis-command cap under continuous worker polling                                              |
+| Object Storage       | AWS S3           | Raw file storage; the only paid service                                                                                                                                                                     |
 
-Free-tier caveat: Render, Neon, Qdrant Cloud, and Upstash free tiers may idle-suspend or cold-start after inactivity — the first request after a quiet period can be noticeably slower.
+Free-tier caveat: Render (including Key Value), Neon, and Qdrant Cloud free tiers may idle-suspend or cold-start after inactivity — the first request after a quiet period can be noticeably slower.
 
 ---
 
