@@ -10,6 +10,7 @@ import {
   jsonb,
   boolean,
   index,
+  uniqueIndex,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
@@ -146,6 +147,22 @@ export const refreshTokens = pgTable(
   (table) => [index('refresh_tokens_user_id_idx').on(table.userId)],
 );
 
+// Per-browser tracking for the shared demo account (isDemo === true users all
+// share one userId; see users.isDemo). One row per distinct x-demo-device-id
+// header ever seen — src/plugins/auth.ts upserts into this on every demo
+// request so firstSeenAt marks "new demo user" and lastSeenAt marks recency.
+export const demoDevices = pgTable(
+  'demo_devices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deviceId: text('device_id').notNull(),
+    firstSeenAt: timestamp('first_seen_at').defaultNow().notNull(),
+    lastSeenAt: timestamp('last_seen_at').defaultNow().notNull(),
+    notes: text('notes'),
+  },
+  (table) => [uniqueIndex('demo_devices_device_id_idx').on(table.deviceId)],
+);
+
 // ─── Inferred types ────────────────────────────────────────────────────────────
 
 export type Document = typeof documents.$inferSelect;
@@ -160,3 +177,4 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type NewRefreshToken = typeof refreshTokens.$inferInsert;
+export type DemoDevice = typeof demoDevices.$inferSelect;

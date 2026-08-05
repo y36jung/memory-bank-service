@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { AppError } from '../lib/errors.js';
+import { recordDemoDeviceSeen } from '../lib/demoDeviceTracking.js';
 
 // fastifyJwt registration + the `declare module '@fastify/jwt'` augmentation
 // live in ./jwt.ts (registered at root). This plugin is registered inside
@@ -39,6 +40,13 @@ export const authPlugin = fp(async (app) => {
       const existing = request.headers[DEMO_DEVICE_HEADER_NAME];
       if (typeof existing === 'string' && existing.length > 0) {
         request.demoDeviceId = existing;
+        try {
+          if (await recordDemoDeviceSeen(existing)) {
+            request.log.info({ deviceId: existing }, 'new demo device seen');
+          }
+        } catch (err) {
+          request.log.warn({ err, deviceId: existing }, 'failed to record demo device');
+        }
       }
     }
   });
