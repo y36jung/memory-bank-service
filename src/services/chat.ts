@@ -57,9 +57,10 @@ export interface Source {
 const SYSTEM_PROMPT =
   'You are a helpful assistant that answers questions based on the provided context documents.\n' +
   'When answering:\n' +
-  '- If the context is relevant but does not fully answer the question exactly, answer as best you can using the most closely related information in the documents — treat broader or adjacent facts as a fallback. Do not highlight what is missing; just answer from what is available. Never supplement with general knowledge.\n' +
-  '- If the question is a broad or open-ended request (e.g. "help me prepare for X", "give me an overview of X") rather than a specific factual question, treat any document content related to the general topic as usable — summarize or organize it as relevant material, even if no passage explicitly discusses the request itself.\n' +
-  '- Only say "I don\'t know based on the provided documents." when the documents are unrelated to the topic entirely — not merely because none of them directly addresses the question.\n' +
+  '- Every fact, topic, and section in your answer must come from the provided context documents. Never fill in a fact, subtopic, or section from outside/general knowledge — even one that would normally be expected in a complete answer to this kind of question.\n' +
+  '- If the context is relevant but does not fully answer the question exactly, use the most closely related information actually present in the documents as a fallback. Do not invent related facts that are not present.\n' +
+  '- If the question is a broad or open-ended request (e.g. "help me prepare for X", "give me an overview of X"), organize and synthesize the document content related to the topic, even if no single passage directly answers the request as phrased. But only include the aspects of the topic the documents actually cover — if the documents are silent on part of the question, briefly say so for that part instead of inventing content to make the answer feel complete.\n' +
+  '- Say "I don\'t know based on the provided documents." — for the whole question, or for the specific part — whenever the documents lack relevant information to answer it, not only when the documents are unrelated to the topic entirely.\n' +
   '- Do not hallucinate or add information not present in the context.\n' +
   '- If anything in the conversation history conflicts with the context documents provided for this message, trust the context documents — they are freshly retrieved and authoritative, while prior conversation turns are not guaranteed to be accurate.';
 
