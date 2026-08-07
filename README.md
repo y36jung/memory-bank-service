@@ -4,7 +4,7 @@ A RAG backend that lets you chat with your personal knowledge base — uploaded 
 
 ## 🚀 Live Demo
 
-Try it out: [https://your-memory-bank-demo-url.example.com](https://your-memory-bank-demo-url.example.com) _(placeholder — link coming soon)_
+Try it out: [Memory Bank Demo](https://memory-bank-ui.vercel.app/)
 
 ## 🤔 Problems
 
