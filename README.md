@@ -2,6 +2,10 @@
 
 A RAG backend that lets you chat with your personal knowledge base — uploaded documents, emails, and cloud files.
 
+## 🚀 Live Demo
+
+Try it out: [https://your-memory-bank-demo-url.example.com](https://your-memory-bank-demo-url.example.com) _(placeholder — link coming soon)_
+
 ## 🤔 Problems
 
 ### 1. Siloed knowledge base
