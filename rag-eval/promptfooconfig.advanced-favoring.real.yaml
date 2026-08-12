@@ -1,0 +1,16 @@
+description: 'Memory Bank RAG eval — cases designed to favor the real pipeline (list_documents intent, file-metadata via keyword filter)'
+
+prompts:
+  - '{{query}}'
+
+providers:
+  - id: file://providers/memory-bank-provider.js
+    label: memory-bank-chat
+
+defaultTest:
+  options:
+    provider: memory-bank-chat
+
+tests:
+  - tests/document_listing.yaml
+  - tests/file_metadata.yaml

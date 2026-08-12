@@ -81,6 +81,61 @@ function assembleChunks(segments: string[]): string[] {
 }
 
 /**
+ * Detects section headings and splits `text` into section-scoped blocks so a
+ * single chunk never straddles two unrelated sections (a section that itself
+ * exceeds TARGET_TOKENS is still further split downstream by the normal
+ * paragraph/sentence assembly, scoped to that section). Recognizes two
+ * heading conventions:
+ *   - Markdown ATX headers: a line starting with 1-6 '#' followed by a space.
+ *   - Setext-style headers: a non-blank line immediately followed by a line
+ *     of 3+ repeated '-' or '=' characters (e.g. "HTTP STATUS CODES\n-----").
+ * Falls back to returning the whole text as one section when no headings are
+ * found, preserving prior behavior for unstructured documents.
+ */
+function splitIntoSections(text: string): string[] {
+  const lines = text.split('\n');
+  const headingIndices: number[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === undefined) continue;
+
+    if (/^#{1,6}\s+\S/.test(line)) {
+      headingIndices.push(i);
+      continue;
+    }
+
+    const next = lines[i + 1];
+    if (line.trim().length > 0 && next !== undefined && /^(-{3,}|={3,})$/.test(next.trim())) {
+      headingIndices.push(i);
+    }
+  }
+
+  if (headingIndices.length === 0) {
+    return [text];
+  }
+
+  const sections: string[] = [];
+
+  // Preserve any preamble text before the first detected heading.
+  const firstHeadingLine = headingIndices[0] as number;
+  if (firstHeadingLine > 0) {
+    const preamble = lines.slice(0, firstHeadingLine).join('\n');
+    if (preamble.trim().length > 0) {
+      sections.push(preamble);
+    }
+  }
+
+  for (let i = 0; i < headingIndices.length; i++) {
+    const start = headingIndices[i] as number;
+    const end = i + 1 < headingIndices.length ? (headingIndices[i + 1] as number) : lines.length;
+    sections.push(lines.slice(start, end).join('\n'));
+  }
+
+  return sections;
+}
+
+/**
  * Split text into fine-grained segments (sentence or word level) suitable for
  * overlap-aware chunk assembly. Always splits to at least sentence granularity
  * so the overlap walk in assembleChunks can pick up ~150 tokens cleanly.
@@ -132,9 +187,16 @@ export function chunkText(text: string): Chunk[] {
     return [{ content: text, tokenCount: totalTokens, chunkIndex: 0 }];
   }
 
-  // Produce fine-grained segments, then greedily reassemble into chunks with overlap.
-  const segments = splitToSegments(text);
-  const rawChunks = assembleChunks(segments);
+  // Split into topically-coherent sections first (so a chunk never bundles
+  // unrelated sections together and dilutes its embedding), then within each
+  // section, produce fine-grained segments and greedily reassemble into
+  // chunks with overlap.
+  const sections = splitIntoSections(text);
+  const rawChunks = sections.flatMap((section) => {
+    if (section.trim().length === 0) return [];
+    const segments = splitToSegments(section);
+    return assembleChunks(segments);
+  });
 
   return rawChunks.map((content, idx) => ({
     content,

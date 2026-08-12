@@ -1,0 +1,31 @@
+# File-metadata queries: format is structural metadata (documents.mimeType),
+# not something any document's body text talks about — no chunk's *content*
+# is semantically "about" being a CSV. Naive RAG's only signal is content
+# embedding similarity, so it has close to no real signal to find the right
+# file for these queries, and — even if it got lucky — the naive provider's
+# context block (unlike buildContextString() in chat.ts) never surfaces
+# mimeType/size/date at all, so it structurally cannot answer correctly even
+# on a lucky retrieval. The real pipeline's classifyQuery() extracts the
+# named file as documentKeywords, resolves it via retrieveByMetadata()
+# (filename ILIKE match, independent of content embedding), and its context
+# header line includes "Format: {mimeType} | Size: {...}" for every chunk.
+
+- vars:
+    query: 'What file format is my packing_guides.csv document — is it a spreadsheet, plain text, or something else?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s => s.documentName === 'packing_guides.csv');
+    - type: llm-rubric
+      value: 'Identifies the file as CSV. Noting that CSV is itself a plain-text-based format is correct and should not be penalized — only fail this if the answer claims the file is a different, unrelated format (e.g. PDF, Word, JSON, an image), refuses to answer, or says the format is unknown.'
+
+- vars:
+    query: 'What format is my world_destinations.csv file in?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.some(s => s.documentName === 'world_destinations.csv');
+    - type: llm-rubric
+      value: 'Identifies the file as CSV. Noting that CSV is itself a plain-text-based format is correct and should not be penalized — only fail this if the answer claims the file is a different, unrelated format (e.g. PDF, Word, JSON, an image), refuses to answer, or says the format is unknown.'

@@ -1,0 +1,35 @@
+# Document-listing intent: naive RAG has no `list_documents` routing at all —
+# every query, including "what files do I have?", goes through the same
+# top-K content vector search. That caps naive's visible catalog at TOP_K
+# (10) chunks, clustered around whichever handful of documents happen to be
+# nearest in embedding space to the query — it structurally cannot return a
+# complete, accurate inventory of documents it has no strong content-level
+# reason to retrieve. The real pipeline's classifyQuery() intent routing
+# bypasses vector search entirely for these queries and reads the documents
+# table directly (retrieveDocuments() in retrieval.ts), guaranteeing full
+# coverage.
+#
+# Assumes the current 13-fixture rag-eval corpus (3 software + 4 finance +
+# 3 travel + 3 health). Re-count if fixtures/ changes.
+
+- vars:
+    query: 'What documents do I have in my account?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        const uniqueDocs = new Set(sources.map(s => s.documentId));
+        return uniqueDocs.size === 13;
+    - type: llm-rubric
+      value: 'Lists documents spanning multiple distinct topics (e.g. software, finance, travel, health) rather than only a few thematically similar files — consistent with a full inventory, not a partial one.'
+
+- vars:
+    query: 'Which of my uploaded files are CSVs?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        const uniqueDocs = new Set(sources.map(s => s.documentId));
+        return uniqueDocs.size === 13;
+    - type: llm-rubric
+      value: 'Names exactly cultural_etiquette.csv, packing_guides.csv, and world_destinations.csv as CSV files, and does not list any .md or .txt file as a CSV.'
