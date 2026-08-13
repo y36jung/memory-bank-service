@@ -62,7 +62,18 @@ const SYSTEM_PROMPT =
   '- If the question is a broad or open-ended request (e.g. "help me prepare for X", "give me an overview of X"), organize and synthesize the document content related to the topic, even if no single passage directly answers the request as phrased. But only include the aspects of the topic the documents actually cover — if the documents are silent on part of the question, briefly say so for that part instead of inventing content to make the answer feel complete.\n' +
   '- Say "I don\'t know based on the provided documents." — for the whole question, or for the specific part — whenever the documents lack relevant information to answer it, not only when the documents are unrelated to the topic entirely.\n' +
   '- Do not hallucinate or add information not present in the context.\n' +
+  "- If the context documents give different values or claims for the same fact, do not silently pick one — state all differing values and attribute each to its source, even if the question doesn't explicitly ask you to compare documents.\n" +
   '- If anything in the conversation history conflicts with the context documents provided for this message, trust the context documents — they are freshly retrieved and authoritative, while prior conversation turns are not guaranteed to be accurate.';
+
+/**
+ * Used instead of SYSTEM_PROMPT when retrieval was skipped entirely because
+ * classifyQuery() detected the query has no connection to the user's
+ * documents (RetrievalResult.type === 'no_retrieval_needed'). SYSTEM_PROMPT's
+ * "every fact must come from the context documents" rule would otherwise
+ * make the model refuse to answer e.g. "what's 2+2?".
+ */
+const GENERAL_KNOWLEDGE_SYSTEM_PROMPT =
+  "You are a helpful assistant. This question does not require the user's personal documents — answer it directly and concisely using your own knowledge.";
 
 /**
  * Instruction appended to the system prompt when retrieval flags low
@@ -370,12 +381,18 @@ export async function streamChatResponse(
   let sources: Source[];
   let lowConfidence = false;
 
+  let baseSystemPrompt: string = SYSTEM_PROMPT;
+
   if (retrievalResult.type === 'document_list') {
     contextString = buildDocumentListContext(retrievalResult.documents);
     sources = retrievalResult.documents.map((d) => ({
       documentId: d.documentId,
       documentName: d.documentName,
     }));
+  } else if (retrievalResult.type === 'no_retrieval_needed') {
+    contextString = '';
+    sources = [];
+    baseSystemPrompt = GENERAL_KNOWLEDGE_SYSTEM_PROMPT;
   } else {
     contextString = buildContextString(retrievalResult.chunks);
     sources = dedupeSourcesByDocument(
@@ -392,7 +409,7 @@ export async function streamChatResponse(
   }
 
   let systemContent =
-    contextString.length > 0 ? `${SYSTEM_PROMPT}\n\n${contextString}` : SYSTEM_PROMPT;
+    contextString.length > 0 ? `${baseSystemPrompt}\n\n${contextString}` : baseSystemPrompt;
   if (lowConfidence) {
     systemContent += LOW_CONFIDENCE_INSTRUCTION;
   }

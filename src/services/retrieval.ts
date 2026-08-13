@@ -40,6 +40,10 @@ export interface RetrievedDocument {
 
 export type RetrievalResult =
   | { type: 'document_list'; documents: RetrievedDocument[] }
+  // Query has no connection to the user's documents (classifyQuery's
+  // 'no_document_lookup_needed' intent) — retrieval is skipped entirely rather than
+  // running a vector search that will only ever surface noise.
+  | { type: 'no_retrieval_needed' }
   | {
       type: 'chunk_results';
       chunks: RetrievedChunk[];
@@ -54,6 +58,14 @@ export type RetrievalResult =
 
 const CONTENT_WEIGHT = 0.5;
 const METADATA_WEIGHT = 0.5;
+
+// list_documents wants a full inventory, not a relevance-ranked top-K —
+// reusing retrieve()'s topK (a vector-search relevance count, default 10)
+// here would silently truncate "what documents do I have?" to the 10
+// most-recently-created documents. Decoupled from topK; high enough to be
+// a no-op for realistic personal document counts while still bounding the
+// query.
+const DOCUMENT_LIST_LIMIT = 200;
 
 // Candidate pool fetched from Qdrant/metadata-SQL before reranking — wider than
 // the final topK so the cross-encoder has real candidates to discriminate
@@ -286,8 +298,14 @@ export async function retrieve(
 
   // list_documents path: skip vector search, query documents table directly.
   if (classification?.intent === 'list_documents') {
-    const docs = await retrieveDocuments(userId, classification.filters, topK);
+    const docs = await retrieveDocuments(userId, classification.filters, DOCUMENT_LIST_LIMIT);
     return { type: 'document_list', documents: docs };
+  }
+
+  // no_document_lookup_needed path: query has no connection to the user's
+  // documents — skip vector search entirely rather than attaching noise.
+  if (classification?.intent === 'no_document_lookup_needed') {
+    return { type: 'no_retrieval_needed' };
   }
 
   // Over-fetch beyond topK so the reranker has real candidates to discriminate

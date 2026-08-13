@@ -17,7 +17,7 @@ export interface MetadataFilters {
   timeRangeEndSecs?: number; // seconds
 }
 
-export type QueryIntent = 'list_documents' | 'search_content';
+export type QueryIntent = 'list_documents' | 'search_content' | 'no_document_lookup_needed';
 
 export interface QueryClassification {
   intent: QueryIntent;
@@ -68,7 +68,7 @@ const TitleSchema = z.object({ title: z.string().min(1).max(200) }).strip();
 
 const QueryClassificationSchema = z
   .object({
-    intent: z.enum(['list_documents', 'search_content']),
+    intent: z.enum(['list_documents', 'search_content', 'no_document_lookup_needed']),
     documentKeywords: z.array(z.string()).optional(),
     uploadedAfter: z
       .string()
@@ -97,9 +97,11 @@ const EXTRACT_FILTERS_TOOL: OpenAI.ChatCompletionTool = {
       properties: {
         intent: {
           type: 'string',
-          enum: ['list_documents', 'search_content'],
+          enum: ['list_documents', 'search_content', 'no_document_lookup_needed'],
           description:
-            "Use 'list_documents' ONLY when the user wants to see which files/documents they own (e.g. 'what did I upload last week?', 'show me my files', 'list documents from January'). Use 'search_content' for ALL other queries — including any query that asks about content or data inside a named document, even if the query uses words like 'list', 'enumerate', or 'all the X in Y' (e.g. 'what countries are in the destinations CSV?', 'list all items in my nutrition guide', 'enumerate the steps in document X').",
+            "Use 'list_documents' ONLY when the user wants to see which files/documents they own (e.g. 'what did I upload last week?', 'show me my files', 'list documents from January'). " +
+            "Use 'no_document_lookup_needed' ONLY if the query matches one of exactly these three patterns: (1) a math expression to compute, (2) a greeting/farewell/thanks with no question, (3) a question about the assistant itself. For ANY other query — including every definitional, explanatory, comparison, or why/how question about a real-world topic, no matter how generic-sounding — you MUST use 'search_content' instead, because the user's own documents might define or discuss that exact topic. Do not reason about whether you personally already know the answer; that is irrelevant to this decision. " +
+            "Use 'search_content' for ALL other queries — including any query that asks about content or data inside a named document, even if the query uses words like 'list', 'enumerate', or 'all the X in Y' (e.g. 'what countries are in the destinations CSV?', 'list all items in my nutrition guide', 'enumerate the steps in document X').",
         },
         documentKeywords: {
           type: 'array',
@@ -205,6 +207,7 @@ export async function classifyQuery(
     `Today's date is ${currentDate}. Use this to resolve relative date expressions like "last week", "yesterday", or "this month" into ISO date strings.\n\n` +
     'Classify the user query and extract metadata filters. Always set the intent field. ' +
     "Use 'list_documents' ONLY when the user wants to enumerate or list the files/documents they own (e.g. 'what did I upload?', 'show me my files'). " +
+    "Use 'no_document_lookup_needed' ONLY if the query matches one of exactly these three patterns: (1) a math expression to compute, (2) a greeting/farewell/thanks with no question, (3) a question about the assistant itself. For any other query — including every definitional, explanatory, comparison, or why/how question about a real-world topic, no matter how generic-sounding — use 'search_content' instead, because the user's own documents might define or discuss that exact topic. Do not reason about whether you personally already know the answer; that is irrelevant to this decision. " +
     "Use 'search_content' for ALL other queries, including any query that asks about content inside a named document — even if the query contains words like 'list', 'enumerate', or 'all the X in Y' (those words refer to items within the document, not to the document itself). " +
     'Return only filters you are confident about. ' +
     "Return an empty object (with just the intent) if the query has no metadata filter intent (e.g. it's asking about content, " +
@@ -275,6 +278,12 @@ export async function classifyQuery(
   // (means "show me all documents").
   if (intent === 'list_documents') {
     return { intent, filters: hasAnyFilter ? filters : null };
+  }
+
+  // no_document_lookup_needed intent is always meaningful — retrieve() skips
+  // vector search entirely for it, so filters are irrelevant.
+  if (intent === 'no_document_lookup_needed') {
+    return { intent, filters: null };
   }
 
   // search_content without any filters degrades to pure vector search.

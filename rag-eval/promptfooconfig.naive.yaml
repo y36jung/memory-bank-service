@@ -1,0 +1,19 @@
+description: 'Memory Bank RAG pipeline eval — naive RAG baseline (no HyDE/classification/rerank)'
+
+prompts:
+  - '{{query}}'
+
+providers:
+  - id: file://providers/naive-rag-provider.js
+    label: naive-rag
+
+defaultTest:
+  options:
+    provider: naive-rag
+
+tests:
+  - tests/retrieval_precision.yaml
+  - tests/semantic_gap.yaml
+  - tests/cross_domain_negative.yaml
+  - tests/multi_source_conflict.yaml
+  - tests/citation_correctness.yaml

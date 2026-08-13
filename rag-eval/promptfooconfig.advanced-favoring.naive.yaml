@@ -1,0 +1,16 @@
+description: 'Memory Bank RAG eval — cases designed to favor the real pipeline, run against the naive-RAG baseline for comparison'
+
+prompts:
+  - '{{query}}'
+
+providers:
+  - id: file://providers/naive-rag-provider.js
+    label: naive-rag
+
+defaultTest:
+  options:
+    provider: naive-rag
+
+tests:
+  - tests/document_listing.yaml
+  - tests/file_metadata.yaml
