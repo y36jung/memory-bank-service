@@ -28,7 +28,7 @@ once the shell command finishes.
    ```
    Expected: `/opt/render/project/src`. If it differs, adjust the relative
    import paths below (`../src/...`) accordingly.
-3. Create the script inside the project tree — **not** `/tmp`. Module
+3. Create and run the script inside the project tree — **not** `/tmp`. Module
    resolution walks up from the importing file's own directory looking for
    `node_modules`; a file under `/tmp` can't find the project's
    `node_modules` and `drizzle-orm` (or any other package) fails to resolve.
@@ -41,66 +41,59 @@ once the shell command finishes.
    import { documents, users, ingestionJobs } from '../src/db/schema.js';
    import { ingestionQueue, redisConnection } from '../src/queue/index.js';
    import { env } from '../src/config/env.js';
-
-   async function main(): Promise<void> {
-     if (env.NODE_ENV !== 'beta') throw new Error(`Refusing to run: NODE_ENV=${env.NODE_ENV}`);
-     if (!new URL(env.DATABASE_URL).host.endsWith('neon.tech')) {
-       throw new Error(`Refusing to run: unexpected DB host ${new URL(env.DATABASE_URL).host}`);
-     }
-
-     const demoUsers = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.isDemo, true));
-     if (demoUsers.length === 0) { console.log('No demo accounts found.'); return; }
-     console.log(`Found ${demoUsers.length} demo account(s): ${demoUsers.map((u) => u.email).join(', ')}`);
-
-     const demoUserIds = demoUsers.map((u) => u.id);
-     const docs = await db
-       .select({ id: documents.id, storageKey: documents.storageKey, status: documents.status, userId: documents.userId })
-       .from(documents)
-       .where(inArray(documents.userId, demoUserIds));
-
-     const targets = docs.filter((d) => d.storageKey);
-     console.log(`${docs.length} document(s) found, ${targets.length} have a storage key.`);
-
-     let enqueued = 0;
-     for (const doc of targets) {
-       const bullJobId = randomUUID();
-       await db.insert(ingestionJobs).values({ documentId: doc.id, bullJobId, status: 'queued', attempt: 1 });
-       await ingestionQueue.add(
-         'ingest',
-         { documentId: doc.id, storageKey: doc.storageKey as string, attempt: 1, userId: doc.userId },
-         { jobId: bullJobId },
-       );
-       enqueued++;
-       console.log(`Enqueued ${enqueued}/${targets.length} — ${doc.id} (was '${doc.status}')`);
-     }
-     console.log(`Done. ${enqueued} job(s) enqueued.`);
-   }
-
-   main()
-     .catch((err) => { console.error('Fatal:', err); process.exitCode = 1; })
-     .finally(async () => { await ingestionQueue.close(); await redisConnection.quit(); await pool.end(); });
-   SCRIPT_EOF
    ```
 
-4. Run it:
-   ```bash
-   npx tsx /opt/render/project/src/scripts/.reingest-demo-tmp.ts
-   ```
-   Expected output: the demo account's email, a document count, then
-   `Enqueued 1/N` … `N/N`, ending with `Done.`.
-5. Clean up the temp file (it's ephemeral — gone on next deploy/restart
-   anyway, but tidy up if the shell session persists):
-   ```bash
-   rm /opt/render/project/src/scripts/.reingest-demo-tmp.ts
-   ```
+async function main(): Promise<void> {
+if (env.NODE_ENV !== 'beta') throw new Error(`Refusing to run: NODE_ENV=${env.NODE_ENV}`);
+if (!new URL(env.DATABASE_URL).host.endsWith('neon.tech')) {
+throw new Error(`Refusing to run: unexpected DB host ${new URL(env.DATABASE_URL).host}`);
+}
+
+const demoUsers = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.isDemo, true));
+if (demoUsers.length === 0) { console.log('No demo accounts found.'); return; }
+console.log(`Found ${demoUsers.length} demo account(s): ${demoUsers.map((u) => u.email).join(', ')}`);
+
+const demoUserIds = demoUsers.map((u) => u.id);
+const docs = await db
+.select({ id: documents.id, storageKey: documents.storageKey, status: documents.status, userId: documents.userId })
+.from(documents)
+.where(inArray(documents.userId, demoUserIds));
+
+const targets = docs.filter((d) => d.storageKey);
+console.log(`${docs.length} document(s) found, ${targets.length} have a storage key.`);
+
+let enqueued = 0;
+for (const doc of targets) {
+const bullJobId = randomUUID();
+await db.insert(ingestionJobs).values({ documentId: doc.id, bullJobId, status: 'queued', attempt: 1 });
+await ingestionQueue.add(
+'ingest',
+{ documentId: doc.id, storageKey: doc.storageKey as string, attempt: 1, userId: doc.userId },
+{ jobId: bullJobId },
+);
+enqueued++;
+console.log(`Enqueued ${enqueued}/${targets.length} — ${doc.id} (was '${doc.status}')`);
+}
+console.log(`Done. ${enqueued} job(s) enqueued.`);
+}
+
+main()
+.catch((err) => { console.error('Fatal:', err); process.exitCode = 1; })
+.finally(async () => { await ingestionQueue.close(); await redisConnection.quit(); await pool.end(); });
+SCRIPT_EOF
+npx tsx /opt/render/project/src/scripts/.reingest-demo-tmp.ts
+rm /opt/render/project/src/scripts/.reingest-demo-tmp.ts
+
+```
 
 ## Notes
 
 - This deletes each targeted document's existing chunks (Postgres + Qdrant)
-  before re-extracting, so those documents are briefly unretrievable while
-  their job runs, and re-embedding spends OpenAI tokens on the beta key.
+before re-extracting, so those documents are briefly unretrievable while
+their job runs, and re-embedding spends OpenAI tokens on the beta key.
 - Scope is _all_ documents for every `is_demo = true` user, regardless of
-  current status — adjust the `docs` query above (e.g. filter by `status`)
-  for a narrower run.
+current status — adjust the `docs` query above (e.g. filter by `status`)
+for a narrower run.
 - Bypasses the app's `assertNotDemo` route guard on purpose — this is an
-  operator action run directly against the DB/queue, not the public API.
+operator action run directly against the DB/queue, not the public API.
+```
