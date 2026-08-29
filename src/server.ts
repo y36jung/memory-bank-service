@@ -85,9 +85,17 @@ export async function start() {
   console.log('Qdrant collection ready');
 
   // Supervisor is started here — imported once qdrant/db/queue are ready.
-  const { startSupervisor } = await import('./services/ingestion.js');
-  const supervisorHandle = (startSupervisor as () => ReturnType<typeof setInterval>)();
-  console.log('Ingestion supervisor started');
+  // Disabled under NODE_ENV=beta: its 10-minute poll cadence keeps the Neon
+  // compute endpoint from ever fully suspending, which dominated the account's
+  // monthly compute-hour usage far more than actual request traffic did.
+  let supervisorHandle: ReturnType<typeof setInterval> | undefined;
+  if (env.NODE_ENV !== 'beta') {
+    const { startSupervisor } = await import('./services/ingestion.js');
+    supervisorHandle = (startSupervisor as () => ReturnType<typeof setInterval>)();
+    console.log('Ingestion supervisor started');
+  } else {
+    console.log('Ingestion supervisor disabled (NODE_ENV=beta)');
+  }
 
   const { startCleanupSupervisor } = await import('./services/cleanup.js');
   const cleanupSupervisorHandle = startCleanupSupervisor();
@@ -101,7 +109,7 @@ export async function start() {
 
   const shutdown = async () => {
     await app.close();
-    clearInterval(supervisorHandle);
+    if (supervisorHandle) clearInterval(supervisorHandle);
     clearInterval(cleanupSupervisorHandle);
     process.exit(0);
   };
