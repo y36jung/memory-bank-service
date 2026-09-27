@@ -23,6 +23,31 @@
     - type: llm-rubric
       value: 'Lists documents spanning multiple distinct topics (e.g. software, finance, travel, health) rather than only a few thematically similar files — consistent with a full inventory, not a partial one.'
 
+# Counting regression: a user with 12 documents asked how many they had and was
+# told 11. Retrieval was correct and all 12 rows reached the model — the number
+# was wrong because the model tallied the rendered table instead of reading a
+# computed total. retrieveDocuments() now states exact SQL counts in the context
+# and the prompt forbids re-counting, so the stated number must be exactly 13.
+- vars:
+    query: 'How many documents do I have in my account?'
+  assert:
+    - type: javascript
+      value: |
+        // Must state 13 as a number or word, and must not state any other count.
+        const said13 = /\b(13|thirteen)\b/i.test(output);
+        const wrongCount = /\b(10|11|12|14|15|ten|eleven|twelve|fourteen|fifteen)\b/i.test(output);
+        return said13 && !wrongCount;
+    - type: llm-rubric
+      value: 'States the total number of documents explicitly as 13. Does not hedge about the count, does not say it is unable to count them, and does not ask the user to clarify what they mean by documents or data.'
+
+# NOT covered here: the vague phrasing the bug was actually reported with ("how
+# many data is here"). Verified against the real pipeline, it routes to
+# search_content, not list_documents — classifyQuery keys on "files"/"documents"
+# and has no vocabulary for "data"/"here", and at the default temperature the
+# routing is unstable run to run. That is a classifier gap, not a counting gap,
+# so a case for it would fail for a reason this file's fix does not address. Add
+# it together with a count/inventory intent in classifyQuery.
+
 - vars:
     query: 'Which of my uploaded files are CSVs?'
   assert:

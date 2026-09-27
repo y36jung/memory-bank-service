@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { db } from '../db/index.js';
-import { chunks, documents } from '../db/schema.js';
+import { chunks, documents, statusEnum } from '../db/schema.js';
 import { batchEmbed } from './embeddings.js';
 import { searchPoints } from './qdrant.js';
 import { eq, inArray, and, gte, lte, asc, desc, sql } from 'drizzle-orm';
@@ -36,10 +36,31 @@ export interface RetrievedDocument {
   mimeType: string;
   sizeBytes: number | null;
   createdAt: Date;
+  status: DocumentStatus; // documents.status — 'indexed' means searchable
+}
+
+/**
+ * Derived from the schema enum rather than re-declared, so adding or renaming a
+ * status is a compile error here instead of a silently-dead `=== 'indexed'`.
+ */
+export type DocumentStatus = (typeof statusEnum.enumValues)[number];
+
+/**
+ * Exact document counts for a list_documents query, computed in SQL rather than
+ * derived from `documents.length`. Two reasons they can't be derived: the array
+ * is capped at DOCUMENT_LIST_LIMIT, and asking GPT-4o to count the rows of the
+ * rendered table gets the wrong answer (12 documents reported as 11).
+ */
+export interface DocumentListCounts {
+  // Every document matching the query's filters, ignoring DOCUMENT_LIST_LIMIT.
+  totalCount: number;
+  // Of those, the ones with status 'indexed' — i.e. actually searchable. The
+  // rest are still in the pipeline or failed, and are listed but not queryable.
+  indexedCount: number;
 }
 
 export type RetrievalResult =
-  | { type: 'document_list'; documents: RetrievedDocument[] }
+  | ({ type: 'document_list'; documents: RetrievedDocument[] } & DocumentListCounts)
   // The user is asking about the app itself (classifyQuery's 'app_identity'
   // intent) — retrieval is skipped entirely rather than running a vector search
   // that will only ever surface noise. This is a positive instruction to
@@ -237,12 +258,28 @@ async function retrieveByMetadata(
  * Retrieves documents from Postgres matching the given metadata filters.
  * Queries the documents table directly — no chunks join needed.
  * Used for list_documents intent queries.
+ *
+ * Returns the (limit-capped) rows alongside exact counts, which the rows alone
+ * can't supply: `limit` truncates them, and the model that reads them cannot
+ * reliably count — 12 rows were once reported to a user as 11 documents.
+ *
+ * The counts are window aggregates in the SAME statement as the rows, not a
+ * second query. Postgres evaluates them over the full matching set before LIMIT
+ * applies, so they stay exact under truncation, and one statement means one
+ * snapshot: a separate COUNT could straddle a concurrent upload or delete and
+ * report a total that contradicts the very rows it was paired with, recreating
+ * this bug from the data side.
+ *
+ * No status filter: a document that failed to ingest still belongs to the
+ * user and must not silently vanish from their inventory. It is reported as
+ * part of `totalCount` but excluded from `indexedCount`, so callers can state
+ * both numbers instead of conflating owned with searchable.
  */
 async function retrieveDocuments(
   userId: string,
   filters: MetadataFilters | null,
   limit = 20,
-): Promise<RetrievedDocument[]> {
+): Promise<{ documents: RetrievedDocument[] } & DocumentListCounts> {
   const andConditions = [];
   andConditions.push(eq(documents.userId, userId));
 
@@ -268,20 +305,41 @@ async function retrieveDocuments(
       mimeType: documents.mimeType,
       sizeBytes: documents.sizeBytes,
       createdAt: documents.createdAt,
+      status: documents.status,
+      // Repeated on every row (same value), read off the first below. pg returns
+      // int8 as a string and a bare sql`` template has no decoder, so
+      // .mapWith(Number) is required to make the declared type honest — unlike
+      // drizzle's count(), which applies it internally.
+      totalCount: sql<number>`count(*) OVER ()`.mapWith(Number),
+      // eq() rather than a raw `= 'indexed'` literal so the enum value is
+      // type-checked: a rename breaks the build instead of quietly yielding 0.
+      indexedCount:
+        sql<number>`count(*) FILTER (WHERE ${eq(documents.status, 'indexed')}) OVER ()`.mapWith(
+          Number,
+        ),
     })
     .from(documents)
     .where(andConditions.length > 0 ? and(...andConditions) : undefined)
     .orderBy(desc(documents.createdAt))
     .limit(limit);
 
-  return rows.map((row) => ({
+  const mapped = rows.map((row) => ({
     documentId: row.id,
     documentName: row.originalName,
     sourceType: row.sourceType,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes ?? null,
     createdAt: row.createdAt,
+    status: row.status,
   }));
+
+  // No rows means nothing matched the filters, so both counts are genuinely 0 —
+  // the window aggregates are present by construction whenever a row exists.
+  return {
+    documents: mapped,
+    totalCount: rows[0]?.totalCount ?? 0,
+    indexedCount: rows[0]?.indexedCount ?? 0,
+  };
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────────
@@ -314,8 +372,8 @@ export async function retrieve(
 
   // list_documents path: skip vector search, query documents table directly.
   if (classification?.intent === 'list_documents') {
-    const docs = await retrieveDocuments(userId, classification.filters, DOCUMENT_LIST_LIMIT);
-    return { type: 'document_list', documents: docs };
+    const listed = await retrieveDocuments(userId, classification.filters, DOCUMENT_LIST_LIMIT);
+    return { type: 'document_list', ...listed };
   }
 
   // app_identity path: the user is asking about the app itself — skip vector

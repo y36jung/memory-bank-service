@@ -613,6 +613,8 @@ describe('score fusion — hybrid metadata + vector search', () => {
 // ---------------------------------------------------------------------------
 
 describe('AC-IR: retrieve() — list_documents intent routing', () => {
+  // totalCount/indexedCount are window aggregates, so Postgres repeats them on
+  // every row of the result set — the mock rows mirror that.
   const mockDocRow = {
     id: 'doc-uuid-1',
     originalName: 'report.pdf',
@@ -620,6 +622,9 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
     mimeType: 'application/pdf',
     sizeBytes: 1024,
     createdAt: new Date('2026-06-18T10:00:00Z'),
+    status: 'indexed',
+    totalCount: 1,
+    indexedCount: 1,
   };
 
   it('AC-IR-1: returns { type: document_list, documents } for list_documents intent', async () => {
@@ -693,7 +698,16 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
       filters: null,
     });
 
-    const allDocs = [mockDocRow, { ...mockDocRow, id: 'doc-uuid-2', originalName: 'notes.txt' }];
+    const allDocs = [
+      { ...mockDocRow, totalCount: 2, indexedCount: 2 },
+      {
+        ...mockDocRow,
+        id: 'doc-uuid-2',
+        originalName: 'notes.txt',
+        totalCount: 2,
+        indexedCount: 2,
+      },
+    ];
     const docChain = makeDocumentListSelectChain(allDocs);
     vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
 
@@ -702,6 +716,86 @@ describe('AC-IR: retrieve() — list_documents intent routing', () => {
     expect(result.type).toBe('document_list');
     if (result.type === 'document_list') {
       expect(result.documents).toHaveLength(2);
+    }
+  });
+
+  // The regression this whole path exists to prevent: a user with 12 documents
+  // was told they had 11, because the count was read off the rendered table by
+  // the model instead of computed. The counts must therefore come from the
+  // window aggregate and must survive DOCUMENT_LIST_LIMIT truncation — so
+  // `documents.length` is deliberately NOT a valid source for either number.
+  it('AC-IR-6: totalCount/indexedCount come from the aggregate, not documents.length', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: null,
+    });
+
+    // Two rows returned (as if truncated by the limit), five actually matching.
+    const truncatedRows = [
+      { ...mockDocRow, totalCount: 5, indexedCount: 4 },
+      { ...mockDocRow, id: 'doc-uuid-2', totalCount: 5, indexedCount: 4 },
+    ];
+    const docChain = makeDocumentListSelectChain(truncatedRows);
+    vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    const result = await retrieve(TEST_USER_ID, 'how many documents do I have?');
+
+    expect(result.type).toBe('document_list');
+    if (result.type === 'document_list') {
+      expect(result.documents).toHaveLength(2);
+      expect(result.totalCount).toBe(5);
+      expect(result.indexedCount).toBe(4);
+    }
+  });
+
+  it('AC-IR-7: no matching documents yields zero counts', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: null,
+    });
+
+    const docChain = makeDocumentListSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    const result = await retrieve(TEST_USER_ID, 'how many documents do I have?');
+
+    expect(result.type).toBe('document_list');
+    if (result.type === 'document_list') {
+      expect(result.documents).toHaveLength(0);
+      expect(result.totalCount).toBe(0);
+      expect(result.indexedCount).toBe(0);
+    }
+  });
+
+  it('AC-IR-8: carries each document status through, unfiltered', async () => {
+    vi.mocked(queryClassifierModule.classifyQuery).mockResolvedValue({
+      intent: 'list_documents',
+      filters: null,
+    });
+
+    // A failed upload still belongs to the user: it is listed and counted in
+    // totalCount, but excluded from indexedCount.
+    const mixed = [
+      { ...mockDocRow, status: 'indexed', totalCount: 2, indexedCount: 1 },
+      {
+        ...mockDocRow,
+        id: 'doc-uuid-2',
+        originalName: 'broken.docx',
+        status: 'failed',
+        totalCount: 2,
+        indexedCount: 1,
+      },
+    ];
+    const docChain = makeDocumentListSelectChain(mixed);
+    vi.mocked(db.select).mockReturnValue(docChain as unknown as ReturnType<typeof db.select>);
+
+    const result = await retrieve(TEST_USER_ID, 'what documents do I have?');
+
+    expect(result.type).toBe('document_list');
+    if (result.type === 'document_list') {
+      expect(result.documents.map((d) => d.status)).toEqual(['indexed', 'failed']);
+      expect(result.totalCount).toBe(2);
+      expect(result.indexedCount).toBe(1);
     }
   });
 });

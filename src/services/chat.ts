@@ -4,7 +4,12 @@ import { db } from '../db/index.js';
 import { messages, chatSessions, DEFAULT_SESSION_TITLE } from '../db/schema.js';
 import { eq, desc, and, or, ne, inArray, exists, sql } from 'drizzle-orm';
 import { QueryBuilder } from 'drizzle-orm/pg-core';
-import { retrieve, type RetrievedChunk, type RetrievedDocument } from './retrieval.js';
+import {
+  retrieve,
+  type DocumentListCounts,
+  type RetrievedChunk,
+  type RetrievedDocument,
+} from './retrieval.js';
 import {
   classifyHistoryScope,
   generateSessionTitle,
@@ -156,6 +161,28 @@ const LOW_CONFIDENCE_INSTRUCTION =
   'question, say so explicitly and ask the user to clarify or confirm relevance, rather than answering confidently.';
 
 /**
+ * Instruction appended to the system prompt for the document_list branch only.
+ * Kept here rather than inside buildDocumentListContext() because this file
+ * separates the two concerns: context strings carry data, prompt constants carry
+ * the rules for reading it.
+ *
+ * Exists because the model cannot be trusted to count. A user with 12 documents
+ * asked how many they had and was told 11 — the table was complete and the
+ * `sources` array (built from the same array) was right, but the number in the
+ * prose was sampled rather than computed. retrieveDocuments() now states exact
+ * SQL counts in the context; this forbids deriving a count any other way.
+ */
+const DOCUMENT_LIST_INSTRUCTION =
+  "\n\nNote: the Documents table above is the user's own document inventory, and the bolded " +
+  'totals line states the exact counts. If the user asks how many documents they have, read the ' +
+  'number from that totals line — never arrive at a count by tallying the table rows yourself, ' +
+  'and never state a number that contradicts the stated totals. Unless the table says only some ' +
+  'rows are listed, it is the complete inventory for this question. A document whose Status is ' +
+  'not "indexed" is still being processed or failed to process: it belongs to the user and counts ' +
+  'toward the total, but its contents are not searchable yet, so do not imply you can answer ' +
+  'questions about what is inside it.';
+
+/**
  * Deterministic, app-authored reply used when retrieval finds no chunks at
  * all — either nothing cleared the score-threshold backoff, or nothing cleared
  * RERANK_IRRELEVANCE_THRESHOLD, i.e. the question is neither about the app nor
@@ -177,6 +204,15 @@ function formatTimestamp(secs: number): string {
   const m = Math.floor(secs / 60);
   const s = Math.floor(secs % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Makes a value safe to drop into one cell of a markdown table. Only pipes and
+ * newlines matter: either one ends the cell early, so an uploaded file named
+ * `a|b.pdf` would render as two columns and misalign the rest of the row.
+ */
+function escapeTableCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }
 
 function formatSize(sizeBytes: number | null): string {
@@ -219,22 +255,46 @@ function buildContextString(retrievedChunks: RetrievedChunk[]): string {
 /**
  * Format a document list as a markdown table for the system prompt context.
  * Used when the query intent is list_documents.
+ *
+ * Leads with the exact counts from SQL (`counts`, not `docs.length`) so a "how
+ * many documents do I have?" answer is read off a stated number instead of
+ * tallied from the rows — see DOCUMENT_LIST_INSTRUCTION. `docs` is capped at
+ * DOCUMENT_LIST_LIMIT, so when it is shorter than the true total the block says
+ * so explicitly rather than letting a partial table read as the whole inventory.
  */
-function buildDocumentListContext(docs: RetrievedDocument[]): string {
+function buildDocumentListContext(docs: RetrievedDocument[], counts: DocumentListCounts): string {
+  const { totalCount, indexedCount } = counts;
+
   if (docs.length === 0) {
-    return '## Documents\n\nNo documents found matching the query.\n';
+    return '## Documents\n\n**Totals for this query: 0 documents.**\n\nNo documents found matching the query.\n';
   }
 
+  const noun = totalCount === 1 ? 'document' : 'documents';
+  const totals =
+    indexedCount === totalCount
+      ? `**Totals for this query: ${totalCount} ${noun}, all indexed and searchable.**`
+      : `**Totals for this query: ${totalCount} ${noun}, of which ${indexedCount} ${
+          indexedCount === 1 ? 'is' : 'are'
+        } indexed and searchable.**`;
+
+  const truncation =
+    docs.length < totalCount
+      ? `\nOnly the ${docs.length} most recently uploaded are listed below; the totals above are still exact.`
+      : '';
+
   const header =
-    '## Documents\n\n| Name | Uploaded | Source | Format | Size |\n|------|----------|--------|--------|------|\n';
+    '\n\n| Name | Uploaded | Source | Format | Size | Status |\n|------|----------|--------|--------|------|--------|\n';
   const rows = docs
     .map(
       (d) =>
-        `| ${d.documentName} | ${d.createdAt.toISOString().split('T')[0]} | ${d.sourceType} | ${d.mimeType} | ${formatSize(d.sizeBytes)} |`,
+        // Uploaded filenames are user-controlled, and a literal '|' or newline in
+        // one would split or truncate the row — corrupting exactly the table the
+        // stated totals are meant to describe.
+        `| ${escapeTableCell(d.documentName)} | ${d.createdAt.toISOString().split('T')[0]} | ${d.sourceType} | ${d.mimeType} | ${formatSize(d.sizeBytes)} | ${d.status} |`,
     )
     .join('\n');
 
-  return header + rows + '\n';
+  return `## Documents\n\n${totals}${truncation}${header}${rows}\n`;
 }
 
 /**
@@ -575,7 +635,9 @@ async function runChatPipeline(
     sources = [];
     baseSystemPrompt = APP_IDENTITY_IN_CONVERSATION_PROMPT;
   } else if (retrievalResult.type === 'document_list') {
-    contextString = buildDocumentListContext(retrievalResult.documents);
+    contextString = buildDocumentListContext(retrievalResult.documents, retrievalResult);
+    // Every listed document is cited, non-indexed ones included, so the sources
+    // the user sees match the rows the model was shown.
     sources = retrievalResult.documents.map((d) => ({
       documentId: d.documentId,
       documentName: d.documentName,
@@ -597,6 +659,9 @@ async function runChatPipeline(
 
   let systemContent =
     contextString.length > 0 ? `${baseSystemPrompt}\n\n${contextString}` : baseSystemPrompt;
+  if (retrievalResult.type === 'document_list') {
+    systemContent += DOCUMENT_LIST_INSTRUCTION;
+  }
   if (lowConfidence) {
     systemContent += LOW_CONFIDENCE_INSTRUCTION;
   }
@@ -628,6 +693,11 @@ async function runChatPipeline(
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o',
       stream: true,
+      // A document-inventory answer is arithmetic, not prose: at the default
+      // temperature the sampling variance lands on the digit itself, so the same
+      // 12-row table can come back as 11 or 13. Scoped to this branch — every
+      // other answer keeps the default sampling and its phrasing.
+      ...(retrievalResult.type === 'document_list' ? { temperature: 0 } : {}),
       messages: [systemMsg, ...historyMsgs, userMsg],
     });
 

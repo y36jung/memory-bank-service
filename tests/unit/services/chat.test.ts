@@ -36,6 +36,11 @@
  *             covering a misclassified identity question
  * AC-IDENT-4: once the intro is in history it is replayed to the model, so it
  *             can recognise it has already introduced itself
+ * AC-DOCLIST: the document_list context block states exact SQL counts, renders
+ *             each document's status, declares truncation, escapes pipes in
+ *             filenames, and instructs the model never to tally the rows —
+ *             plus temperature: 0 on that branch only. Guards the regression
+ *             where 12 documents were reported to the user as 11.
  *
  * NOT covered here: the anti-hallucination-compounding guard (excluding
  * assistant messages with no retrieved sources) lives in loadHistory()'s SQL
@@ -48,6 +53,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { FastifyReply } from 'fastify';
 import type { HistoryScope } from '../../../src/services/queryClassifier.js';
+import type { RetrievedDocument } from '../../../src/services/retrieval.js';
 
 const { mockChatCreate } = vi.hoisted(() => ({
   mockChatCreate: vi.fn(),
@@ -542,6 +548,159 @@ describe('AC-LOWCONF: low-confidence retrieval (score-threshold backoff) hedging
     const events = sseEventsWritten(reply);
     const doneEvent = events.find((e) => e['type'] === 'done');
     expect(doneEvent).toMatchObject({ uncertain: false });
+  });
+});
+
+// A user with 12 documents asked how many they had and was told 11: the table
+// held all 12 rows and `sources` was right, but the number in the prose was
+// sampled rather than computed. These tests pin the two halves of the fix —
+// the counts are stated in the context, and the model is told to quote them
+// and never tally rows — plus the deterministic decoding that keeps the digit
+// from being re-rolled.
+describe('AC-DOCLIST: document_list context states exact counts', () => {
+  const makeDoc = (overrides: Partial<RetrievedDocument> = {}): RetrievedDocument => ({
+    documentId: 'doc-1',
+    documentName: 'nutrition_guide.html',
+    sourceType: 'upload',
+    mimeType: 'text/html',
+    sizeBytes: 42_000,
+    createdAt: new Date('2026-09-14T10:00:00Z'),
+    status: 'indexed',
+    ...overrides,
+  });
+
+  function setupDocumentList(
+    documents: RetrievedDocument[],
+    totalCount: number,
+    indexedCount: number,
+  ) {
+    return setupHappyPath([], { mode: 'recent' }, {
+      type: 'document_list',
+      documents,
+      totalCount,
+      indexedCount,
+    } as Awaited<ReturnType<typeof retrievalModule.retrieve>>);
+  }
+
+  function systemPromptSent(): string {
+    const callArgs = mockChatCreate.mock.calls[0]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    return callArgs.messages[0]?.content ?? '';
+  }
+
+  it('states the exact totals and forbids tallying the rows', async () => {
+    setupDocumentList([makeDoc(), makeDoc({ documentId: 'doc-2' })], 12, 12);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'how many data is here', reply);
+
+    const systemMessage = systemPromptSent();
+    expect(systemMessage).toContain(
+      '**Totals for this query: 12 documents, all indexed and searchable.**',
+    );
+    expect(systemMessage).toContain('never arrive at a count by tallying the table rows yourself');
+  });
+
+  it('distinguishes owned from searchable when some documents are not indexed', async () => {
+    setupDocumentList([makeDoc(), makeDoc({ documentId: 'doc-2', status: 'failed' })], 12, 11);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'how many documents do I have?', reply);
+
+    expect(systemPromptSent()).toContain(
+      '**Totals for this query: 12 documents, of which 11 are indexed and searchable.**',
+    );
+  });
+
+  it('renders each status in the table so a failed upload is visible', async () => {
+    setupDocumentList(
+      [makeDoc(), makeDoc({ documentId: 'doc-2', documentName: 'broken.docx', status: 'failed' })],
+      2,
+      1,
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'what documents do I have?', reply);
+
+    const systemMessage = systemPromptSent();
+    expect(systemMessage).toContain('| Name | Uploaded | Source | Format | Size | Status |');
+    expect(systemMessage).toContain(
+      '| broken.docx | 2026-09-14 | upload | text/html | 41.0 KB | failed |',
+    );
+  });
+
+  // The truncation note is what stops a capped table from reading as the whole
+  // inventory while the totals line states a larger number.
+  it('declares truncation only when the listed rows are fewer than the total', async () => {
+    setupDocumentList([makeDoc(), makeDoc({ documentId: 'doc-2' })], 350, 350);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'list my documents', reply);
+
+    expect(systemPromptSent()).toContain('Only the 2 most recently uploaded are listed below');
+  });
+
+  it('omits the truncation note when every matching document is listed', async () => {
+    setupDocumentList([makeDoc(), makeDoc({ documentId: 'doc-2' })], 2, 2);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'list my documents', reply);
+
+    expect(systemPromptSent()).not.toContain('most recently uploaded are listed below');
+  });
+
+  it('escapes a pipe in a document name so the row cannot split', async () => {
+    setupDocumentList([makeDoc({ documentName: 'a|b.pdf' })], 1, 1);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'list my documents', reply);
+
+    expect(systemPromptSent()).toContain('| a\\|b.pdf |');
+  });
+
+  it('states zero rather than leaving the count unstated when nothing matches', async () => {
+    setupDocumentList([], 0, 0);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'how many documents do I have?', reply);
+
+    expect(systemPromptSent()).toContain('**Totals for this query: 0 documents.**');
+  });
+
+  it('cites every listed document, including ones that are not indexed', async () => {
+    setupDocumentList(
+      [makeDoc(), makeDoc({ documentId: 'doc-2', documentName: 'broken.docx', status: 'failed' })],
+      2,
+      1,
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'what documents do I have?', reply);
+
+    const doneEvent = sseEventsWritten(reply).find((e) => e['type'] === 'done');
+    expect(doneEvent?.['sources']).toEqual([
+      { documentId: 'doc-1', documentName: 'nutrition_guide.html' },
+      { documentId: 'doc-2', documentName: 'broken.docx' },
+    ]);
+  });
+
+  it('requests deterministic decoding for this branch only', async () => {
+    setupDocumentList([makeDoc()], 1, 1);
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'how many documents do I have?', reply);
+
+    expect(mockChatCreate.mock.calls[0]?.[0]).toMatchObject({ temperature: 0 });
+  });
+
+  it('leaves sampling at the API default for ordinary grounded answers', async () => {
+    setupHappyPath([], { mode: 'recent' });
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'what does my lease say?', reply);
+
+    expect(mockChatCreate.mock.calls[0]?.[0]).not.toHaveProperty('temperature');
   });
 });
 

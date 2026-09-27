@@ -125,4 +125,31 @@ describe('Two-user Qdrant + Postgres isolation, even for a lexically matching qu
       expect(names).not.toContain('beta-notes.txt');
     }
   }, 30_000);
+
+  // The counts are window aggregates over the same WHERE clause as the rows, so
+  // they inherit the userId scoping — but only if that clause is actually shared.
+  // A count computed without it would leak another user's document total into
+  // the answer, which is why this asserts the exact numbers rather than a range.
+  it('list_documents intent: totalCount and indexedCount are exact and scoped to the querying user', async () => {
+    const userA = await seedUser('isolation-count-a');
+    const userB = await seedUser('isolation-count-b');
+    await seedDocument(userA.id, { originalName: 'count-a-1.txt', status: 'indexed' });
+    await seedDocument(userA.id, { originalName: 'count-a-2.txt', status: 'indexed' });
+    // Owned by A but never ingested: counts toward the total, not toward indexed.
+    await seedDocument(userA.id, { originalName: 'count-a-3.txt', status: 'failed' });
+    await seedDocument(userB.id, { originalName: 'count-b-1.txt', status: 'indexed' });
+
+    const result = await retrieve(userA.id, 'What documents have I uploaded so far?');
+
+    expect(result.type).toBe('document_list');
+    if (result.type === 'document_list') {
+      expect(result.totalCount).toBe(3);
+      expect(result.indexedCount).toBe(2);
+      // The counts must describe exactly the rows returned alongside them.
+      expect(result.documents).toHaveLength(result.totalCount);
+      expect(result.documents.filter((d) => d.status === 'indexed')).toHaveLength(
+        result.indexedCount,
+      );
+    }
+  }, 30_000);
 });
