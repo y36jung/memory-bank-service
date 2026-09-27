@@ -68,7 +68,7 @@ export interface Source {
  * grounded in the user's documents. Everything the model is allowed to know
  * about Memory Bank is in this string: it is both the canned first-turn reply
  * (see the app_identity branch in streamChatResponse) and the sole permitted
- * source for APP_IDENTITY_FOLLOWUP_PROMPT below.
+ * source for APP_IDENTITY_IN_CONVERSATION_PROMPT below.
  *
  * Kept deliberately factual about what the app actually supports (the formats
  * listed match src/services/extractor/) — the model has no other information to
@@ -102,28 +102,44 @@ const SYSTEM_PROMPT =
 
 /**
  * Used instead of SYSTEM_PROMPT when classifyQuery() routed the message to the
- * app_identity intent AND the intro above has already been sent in this session
- * (a first-time identity question is answered with APP_INTRO_MESSAGE verbatim
- * and never reaches the model at all).
+ * app_identity intent and the session already has prior messages. The cold-open
+ * case never gets here — it's answered with APP_INTRO_MESSAGE verbatim and never
+ * reaches the model at all (see Step 3a).
  *
- * The constraint is the point: the model is told APP_INTRO_MESSAGE is the whole
- * of its knowledge about the app, so a follow-up that asks for more than the
- * description contains has to be answered by saying there is no more to give,
- * not by inventing plausible product features.
+ * Mid-conversation, an identity question is not self-evidently about the app:
+ * "what is this?" right after a discussion of API design far more likely means
+ * the API design than Memory Bank. So the model's first job is to judge, against
+ * the conversation, whether the question is even unambiguous — and to ask rather
+ * than guess when it isn't. Reciting the app description over a question that
+ * meant something else is the failure this prompt exists to prevent.
+ *
+ * The description is also the model's entire knowledge of the app, so a request
+ * for more than it contains has to be answered by saying there is no more, not
+ * by inventing plausible product features.
  */
-const APP_IDENTITY_FOLLOWUP_PROMPT =
-  'You are the Memory Bank assistant. The user is asking a follow-up question about this app ' +
-  'itself. The following description is the ONLY information you have about it — you know nothing ' +
-  'else about this app, its features, its pricing, its limits, who built it, or how it works ' +
-  'internally:\n\n' +
+const APP_IDENTITY_IN_CONVERSATION_PROMPT =
+  'You are the Memory Bank assistant. The user has asked something that may be about you or about ' +
+  'this app, but this conversation is already underway, so the question may not mean what it would ' +
+  'mean in isolation.\n\n' +
+  'The following description is the ONLY information you have about this app — you know nothing ' +
+  'else about its features, pricing, limits, who built it, or how it works internally:\n\n' +
   APP_INTRO_MESSAGE +
-  '\n\nAnswer only from that description. If the conversation already contains it and the user is ' +
-  'asking for more, tell them plainly that is everything you can share about the app itself, and ' +
-  'invite them to ask about their uploaded documents instead — do not repeat the description back ' +
-  'to them verbatim, and do not pad the answer with new claims to make it feel complete. If they ' +
-  'ask something about the app the description does not cover, say you do not have that ' +
-  'information. Never invent features, integrations, pricing, or technical details. Never describe ' +
-  'yourself as a general-purpose assistant, and never name the model or company behind you.';
+  '\n\nDecide which of these three situations applies, judging against the conversation so far:\n' +
+  '1. The question could plausibly refer to a topic discussed earlier in this conversation rather ' +
+  'than to the app itself — e.g. "what is this?", "what does this do?", "tell me more about this" ' +
+  'after discussing a document. Do NOT answer and do NOT describe the app. Ask one short question ' +
+  'to disambiguate, naming both readings concretely: the specific earlier topic, and this app ' +
+  "itself. Then stop and wait for the user's answer.\n" +
+  '2. The question can only be about you or this app — e.g. "who are you?", "what is Memory Bank?", ' +
+  'or the user has just clarified that they meant the app — and the description above has not yet ' +
+  'been given in this conversation. Answer from the description.\n' +
+  '3. The description has already been given in this conversation and the user is asking for more ' +
+  'about the app. Tell them plainly that this is everything you can share about the app itself, ' +
+  'and invite them to ask about their uploaded documents instead. Do not repeat the description ' +
+  'verbatim, and do not pad the answer with new claims to make it feel complete.\n\n' +
+  'If the user asks something about the app the description does not cover, say you do not have ' +
+  'that information. Never invent features, integrations, pricing, or technical details. Never ' +
+  'describe yourself as a general-purpose assistant, and never name the model or company behind you.';
 
 /**
  * Instruction appended to the system prompt when retrieval flags low
@@ -371,10 +387,11 @@ export async function loadHistory(sessionId: string, historyScope: HistoryScope)
  *      generates and persists a session title, emitted as its own SSE
  *      'title' event.
  *  3. Persists the user message.
- *  3a. If the query was classified app_identity and this session hasn't been
- *      given the intro yet, short-circuits with APP_INTRO_MESSAGE — no GPT-4o
- *      call. If it has, answers with APP_IDENTITY_FOLLOWUP_PROMPT instead,
- *      which confines the model to APP_INTRO_MESSAGE's contents.
+ *  3a. If the query was classified app_identity AND it is the session's first
+ *      message, short-circuits with APP_INTRO_MESSAGE — no GPT-4o call. Later in
+ *      a conversation the same question is ambiguous, so it instead goes to the
+ *      model under APP_IDENTITY_IN_CONVERSATION_PROMPT, which asks the user
+ *      which reading they meant rather than assuming the app.
  *  3b. If retrieval found zero chunks, short-circuits with
  *      NO_RELEVANT_DOCS_MESSAGE — no GPT-4o call. This is where every question
  *      that is neither about the app nor answerable from the user's documents
@@ -402,33 +419,25 @@ export async function streamChatResponse(
       .select({
         id: chatSessions.id,
         title: chatSessions.title,
-        // Both flags use exists() with a query-builder subquery rather than a
-        // raw sql template. It matters: inside a select field list (no join),
+        // Whether the session had any messages BEFORE this one — i.e. whether
+        // this message is the session's cold open. Gates auto-titling, and also
+        // the canned app intro (see Step 3a): an identity question is only
+        // unambiguous when there is no conversation for it to refer back to.
+        //
+        // Uses exists() with a query-builder subquery rather than a raw sql
+        // template, and that matters: inside a select field list (no join),
         // drizzle renders a template's `${table.column}` UNqualified, so
         // `${messages.sessionId} = ${chatSessions.id}` became
-        // `"session_id" = "id"` — and since `messages` has an `id` column of
-        // its own, Postgres resolved both names against the inner table and
-        // silently compared messages.session_id to messages.id, which is never
-        // true. exists() emits the properly qualified correlated reference
+        // `"session_id" = "id"` — and since `messages` has an `id` column of its
+        // own, Postgres resolved both names against the inner table and silently
+        // compared messages.session_id to messages.id, which is never true.
+        // exists() emits the properly qualified correlated reference
         // `"messages"."session_id" = "chat_sessions"."id"`.
         hasMessages: exists(
           qb
             .select({ one: sql`1` })
             .from(messages)
             .where(eq(messages.sessionId, chatSessions.id)),
-        ),
-        // Whether this session has already been given the app intro. Decides
-        // between the canned intro and the constrained follow-up path below;
-        // folded into this query rather than run separately since the row is
-        // already being fetched. Matching on the exact text is sound because
-        // the intro is only ever written verbatim, by sendCannedReply().
-        introSent: exists(
-          qb
-            .select({ one: sql`1` })
-            .from(messages)
-            .where(
-              and(eq(messages.sessionId, chatSessions.id), eq(messages.content, APP_INTRO_MESSAGE)),
-            ),
         ),
       })
       .from(chatSessions)
@@ -462,7 +471,7 @@ export async function streamChatResponse(
       reply,
       requestStart,
       shouldGenerateTitle,
-      Boolean(sessionRow.introSent),
+      !sessionRow.hasMessages,
     );
   } catch (err) {
     console.error('streamChatResponse error:', err);
@@ -480,7 +489,7 @@ async function runChatPipeline(
   reply: FastifyReply,
   requestStart: number,
   shouldGenerateTitle: boolean,
-  introSent: boolean,
+  isFirstMessage: boolean,
 ): Promise<void> {
   // ── Step 2: Retrieve grounding context, classify history scope, and (on a
   // session's first message) generate a title — all independent of each
@@ -515,14 +524,19 @@ async function runChatPipeline(
     }),
   );
 
-  // ── Step 3a: App-identity short-circuit ───────────────────────────────────
-  // The user is asking about the app itself, and this session hasn't been given
-  // the intro yet — send the fixed description with no model call at all. The
-  // answer is known in advance, so asking GPT-4o to produce it would only add
-  // latency, cost, and a chance of drifting into its own pretrained identity.
-  // A follow-up (introSent) falls through to the constrained model path in
-  // step 4 instead, since "is there more?" isn't a fixed answer.
-  if (retrievalResult.type === 'app_identity' && !introSent) {
+  // ── Step 3a: App-identity cold open ───────────────────────────────────────
+  // An identity question as the session's FIRST message can only be about the
+  // app — there is no earlier turn for "what is this?" to refer back to — so the
+  // answer is known in advance and is sent as fixed text. Asking GPT-4o to
+  // produce it would only add latency, cost, and a chance of drifting into its
+  // own pretrained identity.
+  //
+  // Deliberately gated on isFirstMessage, not on the intent alone: mid-conversation
+  // the same words are ambiguous, and replying with the app description would
+  // talk straight past a user who meant the topic they were just discussing.
+  // Those fall through to APP_IDENTITY_IN_CONVERSATION_PROMPT in step 4, which
+  // disambiguates instead of guessing.
+  if (retrievalResult.type === 'app_identity' && isFirstMessage) {
     await sendCannedReply(sessionId, APP_INTRO_MESSAGE, reply, requestStart, 'app-intro');
     return;
   }
@@ -552,13 +566,14 @@ async function runChatPipeline(
   let baseSystemPrompt: string = SYSTEM_PROMPT;
 
   if (retrievalResult.type === 'app_identity') {
-    // Identity follow-up: the intro is already in this session's history (it's
-    // exempted from loadHistory()'s groundedness filter), so the model can see
-    // what it already said. No context block — APP_IDENTITY_FOLLOWUP_PROMPT
-    // carries the app description itself and forbids going beyond it.
+    // Mid-conversation identity question. History is what makes this decidable:
+    // it shows both what "this" might refer to and whether the app has already
+    // been described (the intro is exempted from loadHistory()'s groundedness
+    // filter, so it survives). No context block — the prompt carries the app
+    // description itself and forbids going beyond it.
     contextString = '';
     sources = [];
-    baseSystemPrompt = APP_IDENTITY_FOLLOWUP_PROMPT;
+    baseSystemPrompt = APP_IDENTITY_IN_CONVERSATION_PROMPT;
   } else if (retrievalResult.type === 'document_list') {
     contextString = buildDocumentListContext(retrievalResult.documents);
     sources = retrievalResult.documents.map((d) => ({

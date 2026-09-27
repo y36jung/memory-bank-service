@@ -27,13 +27,15 @@
  *             user-set (non-default) title, even on its first message
  * AC-TITLE-4: a null result from generateSessionTitle leaves the title
  *             untouched and emits no 'title' event
- * AC-IDENT-1: a first app_identity question emits APP_INTRO_MESSAGE verbatim
- *             with no OpenAI call at all
- * AC-IDENT-2: an app_identity follow-up (intro already sent) calls the model
- *             with a system prompt confined to APP_INTRO_MESSAGE, and replays
- *             the prior intro as history
+ * AC-IDENT-1: an app_identity question as the session's FIRST message emits
+ *             APP_INTRO_MESSAGE verbatim with no OpenAI call at all
+ * AC-IDENT-2: the same question mid-conversation does NOT get the canned intro;
+ *             it goes to the model under a prompt that tells it to disambiguate
+ *             between the earlier topic and the app
  * AC-IDENT-3: the grounded SYSTEM_PROMPT also carries the identity exception,
  *             covering a misclassified identity question
+ * AC-IDENT-4: once the intro is in history it is replayed to the model, so it
+ *             can recognise it has already introduced itself
  *
  * NOT covered here: the anti-hallucination-compounding guard (excluding
  * assistant messages with no retrieved sources) lives in loadHistory()'s SQL
@@ -122,13 +124,11 @@ function makeHistoryChain(unboundedRows: { role: string; content: string }[]) {
 // title) — i.e. NOT eligible for auto-titling, so existing happy-path tests
 // that don't care about titling are unaffected. Auto-title tests below pass
 // explicit overrides to make the session look brand new.
-function makeSessionOkChain(
-  overrides: { title?: string; hasMessages?: boolean; introSent?: boolean } = {},
-) {
-  const { title = 'Some Existing Chat', hasMessages = true, introSent = false } = overrides;
+function makeSessionOkChain(overrides: { title?: string; hasMessages?: boolean } = {}) {
+  const { title = 'Some Existing Chat', hasMessages = true } = overrides;
   return {
     from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue([{ id: SESSION_OWNED_BY_A, title, hasMessages, introSent }]),
+    where: vi.fn().mockResolvedValue([{ id: SESSION_OWNED_BY_A, title, hasMessages }]),
   };
 }
 
@@ -166,7 +166,7 @@ function setupHappyPath(
     chunks: [MOCK_CHUNK],
     lowConfidence: false,
   },
-  sessionOverrides: { title?: string; hasMessages?: boolean; introSent?: boolean } = {},
+  sessionOverrides: { title?: string; hasMessages?: boolean } = {},
 ) {
   const { chain: historyChain, limitMock } = makeHistoryChain(historyRows);
 
@@ -377,12 +377,14 @@ describe('AC-ZERO: zero-chunk short-circuit (no relevant documents found)', () =
 });
 
 describe('AC-IDENT: app-identity route', () => {
-  it('AC-IDENT-1: first identity question in a session emits APP_INTRO_MESSAGE verbatim with no model call', async () => {
+  it("AC-IDENT-1: an identity question as the session's first message emits APP_INTRO_MESSAGE verbatim with no model call", async () => {
     const { valuesMock } = setupHappyPath(
       [],
       { mode: 'recent' },
       { type: 'app_identity' },
-      { introSent: false },
+      // Cold open: no prior messages, so "who are you" cannot refer to anything
+      // but the app. The non-default title keeps auto-titling out of this test.
+      { hasMessages: false },
     );
 
     const reply = mockReply();
@@ -408,7 +410,48 @@ describe('AC-IDENT: app-identity route', () => {
     expect(insertedValues.sources).toEqual([]);
   });
 
-  it('AC-IDENT-2: a follow-up once the intro was sent calls the model, constrained to the intro text', async () => {
+  it('AC-IDENT-2: an identity question mid-conversation goes to the model to disambiguate, never the canned intro', async () => {
+    setupHappyPath(
+      [
+        { role: 'user', content: 'what does the api design doc say about versioning?' },
+        { role: 'assistant', content: 'It recommends versioning in the URL path.' },
+      ],
+      { mode: 'recent' },
+      { type: 'app_identity' },
+      // The session already has turns, so "what is this?" might mean the API
+      // design they were just discussing rather than the app.
+      { hasMessages: true },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'what is this?', reply);
+
+    // Crucially NOT the canned short-circuit: assuming the app here would talk
+    // straight past a user who meant the previous topic.
+    expect(mockChatCreate).toHaveBeenCalled();
+    const events = sseEventsWritten(reply);
+    expect(events.find((e) => e['content'] === APP_INTRO_MESSAGE)).toBeUndefined();
+
+    const callArgs = mockChatCreate.mock.calls[0]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    const systemMessage = callArgs.messages[0]?.content ?? '';
+
+    // The app description is the model's only permitted source about the app…
+    expect(systemMessage).toContain(APP_INTRO_MESSAGE);
+    expect(systemMessage).toContain('ONLY information you have');
+    // …it is told to disambiguate rather than assume…
+    expect(systemMessage).toContain('Ask one short question to disambiguate');
+    // …and the document-grounding prompt must not be what's driving this turn.
+    expect(systemMessage).not.toContain('based on the provided context documents');
+    // The prior turn is replayed — it's what makes the ambiguity decidable.
+    expect(historyMessagesSentToOpenAI()).toContainEqual({
+      role: 'assistant',
+      content: 'It recommends versioning in the URL path.',
+    });
+  });
+
+  it('AC-IDENT-4: once the intro is in history, it is replayed so the model can tell it already introduced itself', async () => {
     setupHappyPath(
       [
         { role: 'user', content: 'who are you' },
@@ -416,24 +459,15 @@ describe('AC-IDENT: app-identity route', () => {
       ],
       { mode: 'recent' },
       { type: 'app_identity' },
-      { introSent: true },
+      { hasMessages: true },
     );
 
     const reply = mockReply();
     await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'what else can you do?', reply);
 
     expect(mockChatCreate).toHaveBeenCalled();
-    const callArgs = mockChatCreate.mock.calls[0]?.[0] as {
-      messages: { role: string; content: string }[];
-    };
-    const systemMessage = callArgs.messages[0]?.content ?? '';
-
-    // The app description is the model's only permitted source…
-    expect(systemMessage).toContain(APP_INTRO_MESSAGE);
-    expect(systemMessage).toContain('ONLY information you have');
-    // …and the document-grounding prompt must not be what's driving this turn.
-    expect(systemMessage).not.toContain('based on the provided context documents');
-    // The prior intro is replayed, so the model can tell it already introduced itself.
+    // Situation 3 in the prompt ("already described, so say that's everything")
+    // is only decidable if the intro survives loadHistory's groundedness filter.
     expect(historyMessagesSentToOpenAI()).toContainEqual({
       role: 'assistant',
       content: APP_INTRO_MESSAGE,

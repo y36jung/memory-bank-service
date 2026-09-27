@@ -1,18 +1,26 @@
 # App-identity cases: the ONE class of question answered without retrieval.
 #
 # Everything the assistant may say about itself comes from APP_INTRO_MESSAGE in
-# src/services/chat.ts — a fixed string, sent verbatim on the first identity
-# question in a session and the sole permitted source for follow-ups. So these
-# cases check two distinct failures: routing (does an identity question reach the
-# identity path at all, with no sources attached), and containment (does a
-# follow-up stay inside that description instead of inventing product features).
+# src/services/chat.ts. It is sent verbatim ONLY when the identity question is the
+# session's first message — a cold open, where it can't refer to anything else.
+# Mid-conversation the same words are ambiguous, so the model gets
+# APP_IDENTITY_IN_CONVERSATION_PROMPT and has to disambiguate rather than assume
+# the app.
+#
+# So these cases cover four distinct failures: routing (does a cold-open identity
+# question reach the identity path at all, with no sources attached),
+# disambiguation (does a mid-conversation one ask which reading was meant instead
+# of reciting the app description over a question about a document), containment
+# (does it stay inside the description instead of inventing product features), and
+# over-firing (do non-identity messages stay out of this path entirely).
 #
 # The `not-contains: OpenAI` asserts are the regression guard for the original
 # bug: "who are you" answered "I am an AI developed by OpenAI…" because no
 # system prompt established any identity.
 #
 # Cases with `priorTurns` send those messages into the same session first — see
-# providers/memory-bank-provider.js.
+# providers/memory-bank-provider.js. A case WITHOUT priorTurns is therefore a cold
+# open, which is what puts it on the canned path.
 
 - vars:
     query: 'who are you'
@@ -79,3 +87,73 @@
       value: 'OpenAI'
     - type: llm-rubric
       value: 'States it does not have information about pricing or who built the app. Does not invent a price, a free tier, a company, or an author.'
+
+# ── Mid-conversation, an identity question is ambiguous ─────────────────────────
+#
+# "what is this?" after a document answer is far more likely to mean that
+# document's topic than the app. Reciting the app description here would talk
+# straight past the user, so the assistant has to ask which was meant. This is
+# why the canned intro is gated on the message being the session's FIRST, not on
+# the app_identity intent alone.
+
+- vars:
+    priorTurns:
+      - "Give me a plain-language explanation of the difference between an idempotent HTTP method and one that isn't."
+    query: 'what is this?'
+  assert:
+    # A phrase unique to the app description's body — its presence means the
+    # description was recited instead of the question being disambiguated.
+    # ("Memory Bank" on its own is fine and expected: it names one of the readings.)
+    - type: not-contains
+      value: 'I index them'
+    - type: llm-rubric
+      value: 'Does NOT launch into a description of the Memory Bank app, and does not answer as though the question were about the app. Instead asks the user which they meant, naming both readings concretely: the API design / HTTP idempotency topic just discussed, and the Memory Bank app itself.'
+
+# …and once the user resolves the ambiguity, it answers rather than looping.
+- vars:
+    priorTurns:
+      - "Give me a plain-language explanation of the difference between an idempotent HTTP method and one that isn't."
+      - 'what is this?'
+    query: 'I meant the app itself, not the HTTP stuff'
+  assert:
+    - type: not-contains
+      value: 'OpenAI'
+    - type: llm-rubric
+      value: 'Now describes the Memory Bank app — a personal knowledge base you upload documents to and query with cited answers. Does NOT ask for clarification again, since the user has just given it.'
+
+# ── The identity route must not over-fire ───────────────────────────────────────
+#
+# Regression guards. An earlier wording of the classifier prompt said
+# app_identity covered "a greeting/farewell/thanks with no question", and the
+# classifier generalised "with no question" to every non-interrogative message —
+# so statements and imperatives about the user's own life ("I need to go on a
+# trip") got the app intro instead of their documents.
+#
+# These cases are non-questions on purpose. Unit tests cannot catch this class of
+# bug: they mock the classifier's response, so only a real API call shows which
+# intent a phrasing actually lands on.
+
+- vars:
+    query: 'I need to go on a trip'
+  assert:
+    - type: javascript
+      value: |
+        // Took the retrieval path at all — the identity path attaches no sources.
+        const sources = context.metadata?.sources || [];
+        return sources.length > 0;
+    - type: not-contains
+      value: 'Memory Bank assistant'
+    - type: llm-rubric
+      value: "Draws on the user's own travel documents (packing guidance, destination information) rather than introducing the app or describing its own capabilities."
+
+- vars:
+    query: 'help me prepare for my trip'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.length > 0;
+    - type: not-contains
+      value: 'Memory Bank assistant'
+    - type: llm-rubric
+      value: "Synthesizes the user's travel-related document content for an open-ended request, rather than answering with an introduction to the app."
