@@ -10,6 +10,11 @@
  * call) unless `context.vars.sessionId` is explicitly provided, so unrelated
  * test cases never see each other's chat history.
  *
+ * Multi-turn: `context.vars.priorTurns` (an array of message strings) is sent
+ * into that same session before the prompt under test, so a case can assert on
+ * a follow-up rather than only a cold-open question. `output` remains the last
+ * turn's answer; earlier answers are returned in `metadata.priorAnswers`.
+ *
  * SSE: the real stream has no named `event:` field — every line is
  * `data: <json>` with a `type` discriminator (`delta` | `done` | `error`).
  */
@@ -129,11 +134,25 @@ export default class MemoryBankChatProvider {
   async callApi(prompt, context) {
     try {
       const sessionId = context?.vars?.sessionId || (await createSession());
+
+      // `priorTurns` lets a case set up conversation state before the message
+      // under test — needed for anything that depends on chat history, e.g.
+      // asking a follow-up about an answer the assistant already gave. Sent
+      // serially into the same session, since each turn's reply has to be
+      // persisted before the next turn can see it as history.
+      const priorAnswers = [];
+      for (const turn of context?.vars?.priorTurns ?? []) {
+        priorAnswers.push((await sendMessage(sessionId, turn)).answer);
+      }
+
       const { answer, sources } = await sendMessage(sessionId, prompt);
 
+      // `output` is always the final turn's answer, so every existing
+      // single-turn case and assertion is unaffected; earlier turns are exposed
+      // via metadata for assertions that need to inspect the setup.
       return {
         output: answer,
-        metadata: { sources },
+        metadata: { sources, priorAnswers },
       };
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };

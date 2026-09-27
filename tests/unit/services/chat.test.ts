@@ -27,6 +27,13 @@
  *             user-set (non-default) title, even on its first message
  * AC-TITLE-4: a null result from generateSessionTitle leaves the title
  *             untouched and emits no 'title' event
+ * AC-IDENT-1: a first app_identity question emits APP_INTRO_MESSAGE verbatim
+ *             with no OpenAI call at all
+ * AC-IDENT-2: an app_identity follow-up (intro already sent) calls the model
+ *             with a system prompt confined to APP_INTRO_MESSAGE, and replays
+ *             the prior intro as history
+ * AC-IDENT-3: the grounded SYSTEM_PROMPT also carries the identity exception,
+ *             covering a misclassified identity question
  *
  * NOT covered here: the anti-hallucination-compounding guard (excluding
  * assistant messages with no retrieved sources) lives in loadHistory()'s SQL
@@ -78,7 +85,7 @@ vi.mock('../../../src/services/queryClassifier.js', () => ({
 import * as retrievalModule from '../../../src/services/retrieval.js';
 import * as queryClassifierModule from '../../../src/services/queryClassifier.js';
 import { db } from '../../../src/db/index.js';
-import { streamChatResponse, type Source } from '../../../src/services/chat.js';
+import { streamChatResponse, APP_INTRO_MESSAGE, type Source } from '../../../src/services/chat.js';
 import { AppError } from '../../../src/lib/errors.js';
 import { DEFAULT_SESSION_TITLE } from '../../../src/db/schema.js';
 
@@ -115,11 +122,13 @@ function makeHistoryChain(unboundedRows: { role: string; content: string }[]) {
 // title) — i.e. NOT eligible for auto-titling, so existing happy-path tests
 // that don't care about titling are unaffected. Auto-title tests below pass
 // explicit overrides to make the session look brand new.
-function makeSessionOkChain(overrides: { title?: string; hasMessages?: boolean } = {}) {
-  const { title = 'Some Existing Chat', hasMessages = true } = overrides;
+function makeSessionOkChain(
+  overrides: { title?: string; hasMessages?: boolean; introSent?: boolean } = {},
+) {
+  const { title = 'Some Existing Chat', hasMessages = true, introSent = false } = overrides;
   return {
     from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue([{ id: SESSION_OWNED_BY_A, title, hasMessages }]),
+    where: vi.fn().mockResolvedValue([{ id: SESSION_OWNED_BY_A, title, hasMessages, introSent }]),
   };
 }
 
@@ -157,7 +166,7 @@ function setupHappyPath(
     chunks: [MOCK_CHUNK],
     lowConfidence: false,
   },
-  sessionOverrides: { title?: string; hasMessages?: boolean } = {},
+  sessionOverrides: { title?: string; hasMessages?: boolean; introSent?: boolean } = {},
 ) {
   const { chain: historyChain, limitMock } = makeHistoryChain(historyRows);
 
@@ -364,6 +373,89 @@ describe('AC-ZERO: zero-chunk short-circuit (no relevant documents found)', () =
     expect(insertedValues.role).toBe('assistant');
     expect(insertedValues.content).toContain("couldn't find any relevant documents");
     expect(insertedValues.sources).toEqual([]);
+  });
+});
+
+describe('AC-IDENT: app-identity route', () => {
+  it('AC-IDENT-1: first identity question in a session emits APP_INTRO_MESSAGE verbatim with no model call', async () => {
+    const { valuesMock } = setupHappyPath(
+      [],
+      { mode: 'recent' },
+      { type: 'app_identity' },
+      { introSent: false },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'who are you', reply);
+
+    // The whole point of the canned path: the answer is known in advance, so
+    // GPT-4o never gets a chance to answer from its own pretrained identity.
+    expect(mockChatCreate).not.toHaveBeenCalled();
+
+    const events = sseEventsWritten(reply);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: 'delta', content: APP_INTRO_MESSAGE });
+    expect(events[1]).toMatchObject({ type: 'done', messageId: 'msg-1', sources: [] });
+    expect(reply.raw.end).toHaveBeenCalled();
+
+    const insertedValues = valuesMock.mock.calls.at(-1)?.[0] as {
+      role: string;
+      content: string;
+      sources: unknown[];
+    };
+    expect(insertedValues.role).toBe('assistant');
+    expect(insertedValues.content).toBe(APP_INTRO_MESSAGE);
+    expect(insertedValues.sources).toEqual([]);
+  });
+
+  it('AC-IDENT-2: a follow-up once the intro was sent calls the model, constrained to the intro text', async () => {
+    setupHappyPath(
+      [
+        { role: 'user', content: 'who are you' },
+        { role: 'assistant', content: APP_INTRO_MESSAGE },
+      ],
+      { mode: 'recent' },
+      { type: 'app_identity' },
+      { introSent: true },
+    );
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'what else can you do?', reply);
+
+    expect(mockChatCreate).toHaveBeenCalled();
+    const callArgs = mockChatCreate.mock.calls[0]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    const systemMessage = callArgs.messages[0]?.content ?? '';
+
+    // The app description is the model's only permitted source…
+    expect(systemMessage).toContain(APP_INTRO_MESSAGE);
+    expect(systemMessage).toContain('ONLY information you have');
+    // …and the document-grounding prompt must not be what's driving this turn.
+    expect(systemMessage).not.toContain('based on the provided context documents');
+    // The prior intro is replayed, so the model can tell it already introduced itself.
+    expect(historyMessagesSentToOpenAI()).toContainEqual({
+      role: 'assistant',
+      content: APP_INTRO_MESSAGE,
+    });
+  });
+
+  it('AC-IDENT-3: the grounded system prompt still carries the identity exception and hides the provider', async () => {
+    setupHappyPath([], { mode: 'recent' });
+
+    const reply = mockReply();
+    await streamChatResponse(USER_A, SESSION_OWNED_BY_A, 'what does my lease say?', reply);
+
+    const callArgs = mockChatCreate.mock.calls[0]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    const systemMessage = callArgs.messages[0]?.content ?? '';
+
+    // Classification is an LLM call and will sometimes route an identity
+    // question to search_content — the grounded prompt has to answer it too,
+    // rather than falling back to the model's pretrained self-description.
+    expect(systemMessage).toContain(APP_INTRO_MESSAGE);
+    expect(systemMessage).toContain('never name the model or company behind you');
   });
 });
 

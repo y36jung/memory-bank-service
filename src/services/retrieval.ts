@@ -40,10 +40,12 @@ export interface RetrievedDocument {
 
 export type RetrievalResult =
   | { type: 'document_list'; documents: RetrievedDocument[] }
-  // Query has no connection to the user's documents (classifyQuery's
-  // 'no_document_lookup_needed' intent) — retrieval is skipped entirely rather than
-  // running a vector search that will only ever surface noise.
-  | { type: 'no_retrieval_needed' }
+  // The user is asking about the app itself (classifyQuery's 'app_identity'
+  // intent) — retrieval is skipped entirely rather than running a vector search
+  // that will only ever surface noise. This is a positive instruction to
+  // introduce the app, not a generic "skip retrieval" signal: chat.ts answers
+  // it from the app's own description, the one ungrounded reply permitted.
+  | { type: 'app_identity' }
   | {
       type: 'chunk_results';
       chunks: RetrievedChunk[];
@@ -89,6 +91,17 @@ const SCORE_FLOOR = 0.05;
 // A starting value, not empirically tuned — revisit once production
 // relevance_score distributions are available.
 const RERANK_LOW_CONFIDENCE_THRESHOLD = 0.3;
+
+// Below this, the best chunk Cohere could find isn't about the query at all —
+// not merely a weak match. Retrieval returns zero chunks so chat.ts's fixed
+// "no relevant documents" reply fires, instead of handing GPT-4o noise to hedge
+// over. Necessary because an unrelated query clears the *cosine* SCORE_FLOOR
+// above almost every time: the HyDE hypothetical answer is prose, and prose
+// resembles arbitrary prose, so one hit out of the candidate pool is enough.
+// Deliberately below RERANK_LOW_CONFIDENCE_THRESHOLD, which keeps its hedging
+// band for weak-but-plausible matches. Same caveat as that constant — a
+// starting value, pending real relevance_score distributions.
+const RERANK_IRRELEVANCE_THRESHOLD = 0.05;
 
 /**
  * Builds a descending list of score thresholds from `primary` down to
@@ -275,12 +288,15 @@ async function retrieveDocuments(
 
 /**
  * Classifies the query and routes to either:
+ * - app_identity: the user is asking about the app itself; no retrieval at all
  * - document_list: queries documents table directly (for listing/enumeration queries)
- * - chunk_results: hybrid vector + optional metadata search (for content queries)
+ * - chunk_results: hybrid vector + optional metadata search (for content queries).
+ *   Returns zero chunks when nothing clears RERANK_IRRELEVANCE_THRESHOLD, which
+ *   the caller turns into a fixed "no relevant documents" reply.
  *
  * @param query          Natural-language query string.
  * @param topK           Maximum number of results to retrieve (default: 10).
- * @param scoreThreshold Minimum cosine-similarity score to include (default: 0.4).
+ * @param scoreThreshold Minimum cosine-similarity score to include (default: 0.2).
  */
 export async function retrieve(
   userId: string,
@@ -302,10 +318,10 @@ export async function retrieve(
     return { type: 'document_list', documents: docs };
   }
 
-  // no_document_lookup_needed path: query has no connection to the user's
-  // documents — skip vector search entirely rather than attaching noise.
-  if (classification?.intent === 'no_document_lookup_needed') {
-    return { type: 'no_retrieval_needed' };
+  // app_identity path: the user is asking about the app itself — skip vector
+  // search entirely rather than attaching noise.
+  if (classification?.intent === 'app_identity') {
+    return { type: 'app_identity' };
   }
 
   // Over-fetch beyond topK so the reranker has real candidates to discriminate
@@ -454,6 +470,14 @@ export async function retrieve(
   // hypothetical answer. Neither this nor vectorLowConfidence can cancel the
   // other out — either one being weak is enough.
   const topRerankScore = rerankedChunks[0]?.score ?? 0;
+
+  // Nothing here is about the query — report it as "found nothing" rather than
+  // as a weak find, so the caller sends its fixed refusal. lowConfidence: false
+  // matches every other zero-chunk return in this function.
+  if (topRerankScore < RERANK_IRRELEVANCE_THRESHOLD) {
+    return { type: 'chunk_results', chunks: [], lowConfidence: false };
+  }
+
   const rerankLowConfidence = topRerankScore < RERANK_LOW_CONFIDENCE_THRESHOLD;
   const lowConfidence = vectorLowConfidence || rerankLowConfidence;
 

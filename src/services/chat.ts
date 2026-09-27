@@ -2,7 +2,8 @@ import OpenAI from 'openai';
 import type { FastifyReply } from 'fastify';
 import { db } from '../db/index.js';
 import { messages, chatSessions, DEFAULT_SESSION_TITLE } from '../db/schema.js';
-import { eq, desc, and, or, ne, sql } from 'drizzle-orm';
+import { eq, desc, and, or, ne, inArray, exists, sql } from 'drizzle-orm';
+import { QueryBuilder } from 'drizzle-orm/pg-core';
 import { retrieve, type RetrievedChunk, type RetrievedDocument } from './retrieval.js';
 import {
   classifyHistoryScope,
@@ -17,6 +18,14 @@ import { timed } from '../lib/timing.js';
 // ─── Client ────────────────────────────────────────────────────────────────────
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+
+/**
+ * Driverless builder for correlated subqueries embedded in a select field list
+ * (see the EXISTS flags in streamChatResponse's Step 1). Deliberately not `db`:
+ * these subqueries are only ever compiled into an enclosing statement, never
+ * executed on their own, so they need no connection.
+ */
+const qb = new QueryBuilder();
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -52,6 +61,29 @@ export interface Source {
   content?: string;
 }
 
+// ─── App identity ─────────────────────────────────────────────────────────────
+
+/**
+ * The app's own description — the ONLY thing this assistant may say that isn't
+ * grounded in the user's documents. Everything the model is allowed to know
+ * about Memory Bank is in this string: it is both the canned first-turn reply
+ * (see the app_identity branch in streamChatResponse) and the sole permitted
+ * source for APP_IDENTITY_FOLLOWUP_PROMPT below.
+ *
+ * Kept deliberately factual about what the app actually supports (the formats
+ * listed match src/services/extractor/) — the model has no other information to
+ * fall back on, so anything absent here is something it must decline to answer.
+ *
+ * Exported so tests and loadHistory() below can match on the exact text.
+ */
+export const APP_INTRO_MESSAGE =
+  "I'm the Memory Bank assistant — an AI agent for your personal knowledge base. You upload " +
+  'documents here (PDFs, Word docs, spreadsheets, web pages, images, audio and video), I index ' +
+  'them, and then I answer your questions using only what those documents actually say, citing ' +
+  "the sources I used. I don't answer from general knowledge — if something isn't in your uploads, " +
+  "I'll tell you rather than guess. Ask me about anything you've uploaded, or ask what's in your " +
+  'library to get started.';
+
 // ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT =
@@ -63,17 +95,35 @@ const SYSTEM_PROMPT =
   '- Say "I don\'t know based on the provided documents." — for the whole question, or for the specific part — whenever the documents lack relevant information to answer it, not only when the documents are unrelated to the topic entirely.\n' +
   '- Do not hallucinate or add information not present in the context.\n' +
   "- If the context documents give different values or claims for the same fact, do not silently pick one — state all differing values and attribute each to its source, even if the question doesn't explicitly ask you to compare documents.\n" +
-  '- If anything in the conversation history conflicts with the context documents provided for this message, trust the context documents — they are freshly retrieved and authoritative, while prior conversation turns are not guaranteed to be accurate.';
+  '- If anything in the conversation history conflicts with the context documents provided for this message, trust the context documents — they are freshly retrieved and authoritative, while prior conversation turns are not guaranteed to be accurate.\n' +
+  '- The single exception to the rule that every fact must come from the context documents: if the user asks who or what you are, what this app is, or what you can do, answer from this description of yourself instead — "' +
+  APP_INTRO_MESSAGE +
+  '" Never describe yourself as a general-purpose assistant, and never name the model or company behind you.';
 
 /**
- * Used instead of SYSTEM_PROMPT when retrieval was skipped entirely because
- * classifyQuery() detected the query has no connection to the user's
- * documents (RetrievalResult.type === 'no_retrieval_needed'). SYSTEM_PROMPT's
- * "every fact must come from the context documents" rule would otherwise
- * make the model refuse to answer e.g. "what's 2+2?".
+ * Used instead of SYSTEM_PROMPT when classifyQuery() routed the message to the
+ * app_identity intent AND the intro above has already been sent in this session
+ * (a first-time identity question is answered with APP_INTRO_MESSAGE verbatim
+ * and never reaches the model at all).
+ *
+ * The constraint is the point: the model is told APP_INTRO_MESSAGE is the whole
+ * of its knowledge about the app, so a follow-up that asks for more than the
+ * description contains has to be answered by saying there is no more to give,
+ * not by inventing plausible product features.
  */
-const GENERAL_KNOWLEDGE_SYSTEM_PROMPT =
-  "You are a helpful assistant. This question does not require the user's personal documents — answer it directly and concisely using your own knowledge.";
+const APP_IDENTITY_FOLLOWUP_PROMPT =
+  'You are the Memory Bank assistant. The user is asking a follow-up question about this app ' +
+  'itself. The following description is the ONLY information you have about it — you know nothing ' +
+  'else about this app, its features, its pricing, its limits, who built it, or how it works ' +
+  'internally:\n\n' +
+  APP_INTRO_MESSAGE +
+  '\n\nAnswer only from that description. If the conversation already contains it and the user is ' +
+  'asking for more, tell them plainly that is everything you can share about the app itself, and ' +
+  'invite them to ask about their uploaded documents instead — do not repeat the description back ' +
+  'to them verbatim, and do not pad the answer with new claims to make it feel complete. If they ' +
+  'ask something about the app the description does not cover, say you do not have that ' +
+  'information. Never invent features, integrations, pricing, or technical details. Never describe ' +
+  'yourself as a general-purpose assistant, and never name the model or company behind you.';
 
 /**
  * Instruction appended to the system prompt when retrieval flags low
@@ -91,11 +141,13 @@ const LOW_CONFIDENCE_INSTRUCTION =
 
 /**
  * Deterministic, app-authored reply used when retrieval finds no chunks at
- * all (even after the score-threshold backoff in retrieval.ts). Sent
- * directly instead of asking GPT-4o to generate a refusal, so an ungrounded
- * completion is never a possibility for this case — and because the text is
- * known-trustworthy, loadHistory() (below) exempts it from the
- * empty-sources history filter, unlike a model-authored "I don't know."
+ * all — either nothing cleared the score-threshold backoff, or nothing cleared
+ * RERANK_IRRELEVANCE_THRESHOLD, i.e. the question is neither about the app nor
+ * answerable from anything the user uploaded. Sent directly instead of asking
+ * GPT-4o to generate a refusal, so an ungrounded completion is never a
+ * possibility for this case — and because the text is known-trustworthy,
+ * loadHistory() (below) exempts it from the empty-sources history filter,
+ * unlike a model-authored "I don't know."
  *
  * Exported so the integration suite can assert against the exact text
  * loadHistory()'s SQL predicate matches on, rather than duplicating it.
@@ -187,6 +239,47 @@ function dedupeSourcesByDocument(sources: Source[]): Source[] {
 }
 
 /**
+ * Persist and emit a fixed, app-authored reply, bypassing GPT-4o entirely.
+ * Used for the two answers the app knows in advance — APP_INTRO_MESSAGE and
+ * NO_RELEVANT_DOCS_MESSAGE — so neither can be reworded, hedged, or drifted by
+ * the model. Emits the text as a single `delta` followed by `done`, matching the
+ * SSE shape of a streamed reply, so clients need no special case.
+ *
+ * `sources` is always empty here; both strings are exempted from
+ * loadHistory()'s empty-sources filter precisely because they are app-authored.
+ * A persistence failure is logged but never surfaced — the stream must still
+ * close cleanly, same as the streaming path.
+ */
+async function sendCannedReply(
+  sessionId: string,
+  content: string,
+  reply: FastifyReply,
+  requestStart: number,
+  label: string,
+): Promise<void> {
+  let messageId = '';
+  try {
+    const [inserted] = await db
+      .insert(messages)
+      .values({
+        sessionId,
+        role: 'assistant',
+        content,
+        sources: [] as unknown as Record<string, unknown>[],
+      })
+      .returning({ id: messages.id });
+    messageId = inserted?.id ?? '';
+  } catch (dbErr) {
+    console.error('Failed to persist assistant message:', dbErr);
+  }
+
+  reply.raw.write(`data: ${JSON.stringify({ type: 'delta', content })}\n\n`);
+  reply.raw.write(`data: ${JSON.stringify({ type: 'done', messageId, sources: [] })}\n\n`);
+  reply.raw.end();
+  console.log(`[timing] total request time (${label}): ${Date.now() - requestStart}ms`);
+}
+
+/**
  * Load chat history for the current session, resolving `historyScope` into a
  * concrete row limit ('recent' → HISTORY_DEPTH, 'count' → the extracted
  * count, 'full_session' → unbounded), then applying a token-budget guard so
@@ -206,14 +299,21 @@ function dedupeSourcesByDocument(sources: Source[]): Source[] {
  * populated on user messages, and a NULL/empty sources column excludes the
  * row (`jsonb_array_length` of NULL is NULL, which is falsy in SQL).
  *
- * One exemption: NO_RELEVANT_DOCS_MESSAGE also has empty `sources` (retrieval
- * genuinely found nothing), but unlike a model-authored empty-context reply
- * it is app-authored and therefore known-trustworthy — dropping it would
- * strip the only assistant turn between two user turns, leaving a follow-up
- * like "can you expand on that?" with no antecedent in the model's context
- * even though the user still sees the reply in the transcript. It's kept in
- * history so the model can correctly respond to that follow-up instead of
- * silently losing the thread. The empty-sources filter remains a safety net
+ * Two exemptions, both app-authored fixed strings and therefore
+ * known-trustworthy despite empty `sources`: NO_RELEVANT_DOCS_MESSAGE
+ * (retrieval genuinely found nothing) and APP_INTRO_MESSAGE (the app's own
+ * description). Dropping either would strip the only assistant turn between two
+ * user turns, leaving a follow-up like "can you expand on that?" with no
+ * antecedent in the model's context even though the user still sees the reply in
+ * the transcript. Keeping APP_INTRO_MESSAGE is what lets an identity follow-up
+ * ("what else can you do?") see that the description was already given, so it
+ * can say there is nothing further instead of repeating itself.
+ *
+ * Note what is deliberately NOT exempted: a model-authored identity follow-up
+ * reply. It also carries empty `sources`, but it is model output, exactly the
+ * class this filter exists to drop — so later turns see the fixed intro and the
+ * user's repeated asks (user rows are never filtered), not the model's own
+ * previous paraphrase. The empty-sources filter otherwise remains a safety net
  * for the residual case: a model reply that ignores the "say I don't know"
  * instruction over a genuinely empty context.
  *
@@ -238,7 +338,7 @@ export async function loadHistory(sessionId: string, historyScope: HistoryScope)
         or(
           ne(messages.role, 'assistant'),
           sql`jsonb_array_length(${messages.sources}) > 0`,
-          eq(messages.content, NO_RELEVANT_DOCS_MESSAGE),
+          inArray(messages.content, [NO_RELEVANT_DOCS_MESSAGE, APP_INTRO_MESSAGE]),
         ),
       ),
     )
@@ -271,8 +371,15 @@ export async function loadHistory(sessionId: string, historyScope: HistoryScope)
  *      generates and persists a session title, emitted as its own SSE
  *      'title' event.
  *  3. Persists the user message.
+ *  3a. If the query was classified app_identity and this session hasn't been
+ *      given the intro yet, short-circuits with APP_INTRO_MESSAGE — no GPT-4o
+ *      call. If it has, answers with APP_IDENTITY_FOLLOWUP_PROMPT instead,
+ *      which confines the model to APP_INTRO_MESSAGE's contents.
  *  3b. If retrieval found zero chunks, short-circuits with
- *      NO_RELEVANT_DOCS_MESSAGE — no GPT-4o call.
+ *      NO_RELEVANT_DOCS_MESSAGE — no GPT-4o call. This is where every question
+ *      that is neither about the app nor answerable from the user's documents
+ *      ends up, including general-knowledge ones: there is no path that answers
+ *      from the model's own knowledge.
  *  4. Streams a GPT-4o response via SSE (context flagged as low-confidence
  *     when retrieval only cleared the score-threshold backoff, not the
  *     primary threshold).
@@ -295,7 +402,34 @@ export async function streamChatResponse(
       .select({
         id: chatSessions.id,
         title: chatSessions.title,
-        hasMessages: sql<boolean>`EXISTS (SELECT 1 FROM ${messages} WHERE ${messages.sessionId} = ${chatSessions.id})`,
+        // Both flags use exists() with a query-builder subquery rather than a
+        // raw sql template. It matters: inside a select field list (no join),
+        // drizzle renders a template's `${table.column}` UNqualified, so
+        // `${messages.sessionId} = ${chatSessions.id}` became
+        // `"session_id" = "id"` — and since `messages` has an `id` column of
+        // its own, Postgres resolved both names against the inner table and
+        // silently compared messages.session_id to messages.id, which is never
+        // true. exists() emits the properly qualified correlated reference
+        // `"messages"."session_id" = "chat_sessions"."id"`.
+        hasMessages: exists(
+          qb
+            .select({ one: sql`1` })
+            .from(messages)
+            .where(eq(messages.sessionId, chatSessions.id)),
+        ),
+        // Whether this session has already been given the app intro. Decides
+        // between the canned intro and the constrained follow-up path below;
+        // folded into this query rather than run separately since the row is
+        // already being fetched. Matching on the exact text is sound because
+        // the intro is only ever written verbatim, by sendCannedReply().
+        introSent: exists(
+          qb
+            .select({ one: sql`1` })
+            .from(messages)
+            .where(
+              and(eq(messages.sessionId, chatSessions.id), eq(messages.content, APP_INTRO_MESSAGE)),
+            ),
+        ),
       })
       .from(chatSessions)
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId))),
@@ -310,6 +444,44 @@ export async function streamChatResponse(
   // explicitly (at creation or via PATCH).
   const shouldGenerateTitle = sessionRow.title === DEFAULT_SESSION_TITLE && !sessionRow.hasMessages;
 
+  // The api-transport route flushes SSE headers onto the raw response before
+  // calling this function, so from here on the connection is already
+  // committed to an SSE stream. Any error from this point must become an SSE
+  // `error` event followed by a clean reply.raw.end(), never a rejected
+  // promise: letting it propagate reaches Fastify's default error handler,
+  // which tries to send a second, JSON-shaped response on a connection whose
+  // headers are already sent. That has been observed in practice (a Cohere
+  // rerank 429 exhausting its retries under concurrent load) to cascade into
+  // FST_ERR_REP_INVALID_PAYLOAD_TYPE then ERR_HTTP_HEADERS_SENT and crash the
+  // whole process, taking every other in-flight request down with it.
+  try {
+    await runChatPipeline(
+      userId,
+      sessionId,
+      userMessage,
+      reply,
+      requestStart,
+      shouldGenerateTitle,
+      Boolean(sessionRow.introSent),
+    );
+  } catch (err) {
+    console.error('streamChatResponse error:', err);
+    if (!reply.raw.writableEnded) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: 'Internal error' })}\n\n`);
+      reply.raw.end();
+    }
+  }
+}
+
+async function runChatPipeline(
+  userId: string,
+  sessionId: string,
+  userMessage: string,
+  reply: FastifyReply,
+  requestStart: number,
+  shouldGenerateTitle: boolean,
+  introSent: boolean,
+): Promise<void> {
   // ── Step 2: Retrieve grounding context, classify history scope, and (on a
   // session's first message) generate a title — all independent of each
   // other, so run in parallel.
@@ -343,35 +515,31 @@ export async function streamChatResponse(
     }),
   );
 
-  // ── Step 3b: Zero-chunk short-circuit ─────────────────────────────────────
-  // Retrieval (including its own score-threshold backoff) found nothing at
-  // all. Skip the GPT-4o call entirely rather than trust a freeform refusal —
-  // see NO_RELEVANT_DOCS_MESSAGE for why. No streaming loop: emit the canned
-  // text as a single delta, then done, matching the normal SSE shape below.
-  if (retrievalResult.type === 'chunk_results' && retrievalResult.chunks.length === 0) {
-    let messageId = '';
-    try {
-      const [inserted] = await db
-        .insert(messages)
-        .values({
-          sessionId,
-          role: 'assistant',
-          content: NO_RELEVANT_DOCS_MESSAGE,
-          sources: [] as unknown as Record<string, unknown>[],
-        })
-        .returning({ id: messages.id });
-      messageId = inserted?.id ?? '';
-    } catch (dbErr) {
-      console.error('Failed to persist assistant message:', dbErr);
-    }
+  // ── Step 3a: App-identity short-circuit ───────────────────────────────────
+  // The user is asking about the app itself, and this session hasn't been given
+  // the intro yet — send the fixed description with no model call at all. The
+  // answer is known in advance, so asking GPT-4o to produce it would only add
+  // latency, cost, and a chance of drifting into its own pretrained identity.
+  // A follow-up (introSent) falls through to the constrained model path in
+  // step 4 instead, since "is there more?" isn't a fixed answer.
+  if (retrievalResult.type === 'app_identity' && !introSent) {
+    await sendCannedReply(sessionId, APP_INTRO_MESSAGE, reply, requestStart, 'app-intro');
+    return;
+  }
 
-    reply.raw.write(
-      `data: ${JSON.stringify({ type: 'delta', content: NO_RELEVANT_DOCS_MESSAGE })}\n\n`,
-    );
-    reply.raw.write(`data: ${JSON.stringify({ type: 'done', messageId, sources: [] })}\n\n`);
-    reply.raw.end();
-    console.log(
-      `[timing] total request time (zero-chunk short-circuit): ${Date.now() - requestStart}ms`,
+  // ── Step 3b: Zero-chunk short-circuit ─────────────────────────────────────
+  // Retrieval found nothing at all — either nothing cleared the score-threshold
+  // backoff, or nothing cleared the rerank irrelevance floor. Skip the GPT-4o
+  // call entirely rather than trust a freeform refusal — see
+  // NO_RELEVANT_DOCS_MESSAGE for why. Every question that is neither about the
+  // app nor answerable from the user's documents lands here.
+  if (retrievalResult.type === 'chunk_results' && retrievalResult.chunks.length === 0) {
+    await sendCannedReply(
+      sessionId,
+      NO_RELEVANT_DOCS_MESSAGE,
+      reply,
+      requestStart,
+      'zero-chunk short-circuit',
     );
     return;
   }
@@ -383,16 +551,20 @@ export async function streamChatResponse(
 
   let baseSystemPrompt: string = SYSTEM_PROMPT;
 
-  if (retrievalResult.type === 'document_list') {
+  if (retrievalResult.type === 'app_identity') {
+    // Identity follow-up: the intro is already in this session's history (it's
+    // exempted from loadHistory()'s groundedness filter), so the model can see
+    // what it already said. No context block — APP_IDENTITY_FOLLOWUP_PROMPT
+    // carries the app description itself and forbids going beyond it.
+    contextString = '';
+    sources = [];
+    baseSystemPrompt = APP_IDENTITY_FOLLOWUP_PROMPT;
+  } else if (retrievalResult.type === 'document_list') {
     contextString = buildDocumentListContext(retrievalResult.documents);
     sources = retrievalResult.documents.map((d) => ({
       documentId: d.documentId,
       documentName: d.documentName,
     }));
-  } else if (retrievalResult.type === 'no_retrieval_needed') {
-    contextString = '';
-    sources = [];
-    baseSystemPrompt = GENERAL_KNOWLEDGE_SYSTEM_PROMPT;
   } else {
     contextString = buildContextString(retrievalResult.chunks);
     sources = dedupeSourcesByDocument(

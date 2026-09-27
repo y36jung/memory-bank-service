@@ -387,6 +387,50 @@ describe('AC-CQ-10: search_content with no filters → null', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AC-CQ-IDENT: app_identity intent is preserved with null filters
+//
+// These pin the wiring, not the model's judgement: the mock decides the intent,
+// so what's under test is that classifyQuery passes 'app_identity' through
+// instead of applying the hasAnyFilter guard that nulls out a filterless
+// search_content. Whether GPT-4o-mini actually classifies "who are you" this way
+// is covered by rag-eval/tests/assistant_identity.yaml against the real API.
+// ---------------------------------------------------------------------------
+
+describe('AC-CQ-IDENT: app_identity intent → { intent, filters: null }', () => {
+  it('returns the app_identity intent even though it carries no filters', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ intent: 'app_identity' }));
+
+    const result = await classifyQuery('who are you', TEST_DATE);
+
+    expect(result).not.toBeNull();
+    expect(result?.intent).toBe('app_identity');
+    expect(result?.filters).toBeNull();
+  });
+
+  it('discards any filters the model volunteers alongside app_identity', async () => {
+    mockChatCreate.mockResolvedValue(
+      makeToolCallResponse({ intent: 'app_identity', documentKeywords: ['memory', 'bank'] }),
+    );
+
+    const result = await classifyQuery('what is this app?', TEST_DATE);
+
+    // retrieve() skips vector search entirely for this intent, so filters would
+    // be dead weight — and keyword-matching a document named "memory bank"
+    // must not turn an identity question into a document lookup.
+    expect(result?.intent).toBe('app_identity');
+    expect(result?.filters).toBeNull();
+  });
+
+  it('degrades to null when the model returns an intent outside the enum', async () => {
+    mockChatCreate.mockResolvedValue(makeToolCallResponse({ intent: 'no_document_lookup_needed' }));
+
+    // The pre-rename intent name is no longer valid; zod rejects it and the
+    // caller falls back to pure vector search rather than crashing.
+    expect(await classifyQuery('who are you', TEST_DATE)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AC-CQ-11: filename / document-identity queries → list_documents
 // (moved from RAGAS tc-22: these skip vector search entirely)
 // ---------------------------------------------------------------------------

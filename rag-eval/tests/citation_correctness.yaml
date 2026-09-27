@@ -12,14 +12,6 @@
         return sources.length > 0 && sources.every(s => s.chunkId && s.documentId);
     - type: llm-rubric
       value: 'Mentions growth hormone release and/or glymphatic waste clearance as functions of deep/slow-wave sleep, matching what a cited source chunk would actually contain.'
-
-- vars:
-    query: "What's 2 + 2?"
-  assert:
-    - type: javascript
-      value: |
-        // A question needing no retrieval shouldn't force irrelevant sources into the response.
-        const sources = context.metadata?.sources || [];
-        return sources.length === 0;
-    - type: contains
-      value: '4'
+# The "What's 2 + 2?" case moved to cross_domain_negative.yaml: general-knowledge
+# questions are now refused rather than answered, so it tests refusal behavior,
+# not citation behavior.
