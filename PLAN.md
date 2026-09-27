@@ -371,14 +371,19 @@ The challenge: Postgres and Qdrant are two separate systems with no shared trans
        nothing cleared step 5's irrelevance floor): the "no relevant documents"
        reply. Every question that is neither about the app nor answerable from
        the user's documents ends here — there is no general-knowledge path.
-     - The query was classified 'app_identity' (step 1b) and this session hasn't
-       been given the app intro yet: the intro itself, a fixed description of
-       what Memory Bank is and does. The one ungrounded reply the app permits,
-       and the only text the assistant may state about itself.
-   An 'app_identity' follow-up, once the intro is already in the session, DOES
-   call the model, but with a system prompt that supplies the intro as its only
-   permitted knowledge and requires it to say there is nothing further rather
-   than invent product details. Otherwise:
+     - The query was classified 'app_identity' (step 1b) AND it is the session's
+       first message: the app intro itself, a fixed description of what Memory
+       Bank is and does. The one ungrounded reply the app permits, and the only
+       text the assistant may state about itself.
+   The first-message condition is load-bearing, not an optimisation. On a cold
+   open an identity question has no other possible referent. Mid-conversation it
+   does: "what is this?" right after an answer about API design most likely means
+   the API design. So an 'app_identity' query with prior turns DOES call the
+   model, under a prompt that supplies the intro as its only permitted knowledge
+   about the app and has it pick one of three responses from the conversation:
+   ask which reading was meant when the question could refer to an earlier topic;
+   describe the app when it unambiguously could not; or say there is nothing
+   further to share when the description has already been given. Otherwise:
    System prompt: instructs the model to answer from context only,
                   and say "I don't know" when context is insufficient. Its one
                   exception is a question about this app, answered from the same
