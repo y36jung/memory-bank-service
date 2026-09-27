@@ -3,9 +3,14 @@
 // dance lives in one place.
 
 export async function getAccessToken(baseUrl, email, password) {
+  const registrationSecret = process.env.REGISTRATION_SECRET;
+
   const registerRes = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(registrationSecret ? { 'x-registration-secret': registrationSecret } : {}),
+    },
     body: JSON.stringify({ email, password }),
   });
 

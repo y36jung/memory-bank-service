@@ -1,0 +1,81 @@
+# App-identity cases: the ONE class of question answered without retrieval.
+#
+# Everything the assistant may say about itself comes from APP_INTRO_MESSAGE in
+# src/services/chat.ts — a fixed string, sent verbatim on the first identity
+# question in a session and the sole permitted source for follow-ups. So these
+# cases check two distinct failures: routing (does an identity question reach the
+# identity path at all, with no sources attached), and containment (does a
+# follow-up stay inside that description instead of inventing product features).
+#
+# The `not-contains: OpenAI` asserts are the regression guard for the original
+# bug: "who are you" answered "I am an AI developed by OpenAI…" because no
+# system prompt established any identity.
+#
+# Cases with `priorTurns` send those messages into the same session first — see
+# providers/memory-bank-provider.js.
+
+- vars:
+    query: 'who are you'
+  assert:
+    - type: javascript
+      value: |
+        // Identity questions skip retrieval entirely — no sources should be attached.
+        const sources = context.metadata?.sources || [];
+        return sources.length === 0;
+    - type: contains
+      value: 'Memory Bank'
+    - type: not-contains
+      value: 'OpenAI'
+    - type: llm-rubric
+      value: "Introduces itself as an assistant for the user's own uploaded-document knowledge base and explains that it answers from those documents. Does not describe itself as a general-purpose assistant and does not name the model or company behind it."
+
+- vars:
+    query: 'what is this app?'
+  assert:
+    - type: javascript
+      value: |
+        const sources = context.metadata?.sources || [];
+        return sources.length === 0;
+    - type: contains
+      value: 'Memory Bank'
+    - type: not-contains
+      value: 'OpenAI'
+    - type: llm-rubric
+      value: 'Explains the app is a personal knowledge base you upload documents to and then query, rather than answering as a generic chatbot.'
+
+# Follow-up: must stay inside what it already said. The intro is replayed as
+# history (it's exempted from loadHistory's empty-sources filter), so the model
+# can see it has already introduced itself.
+- vars:
+    priorTurns:
+      - 'who are you'
+    query: 'what else can you do?'
+  assert:
+    - type: not-contains
+      value: 'OpenAI'
+    - type: llm-rubric
+      value: 'Answers only from what it already said about Memory Bank — indexing uploaded documents and answering questions from them with cited sources. Invents no capabilities beyond that: no integrations with external services, no reminders or scheduling, no pricing, no claims about its underlying model or training.'
+
+# The exhaustion case: once the description has been given and re-probed, the
+# assistant has to say there is nothing further rather than padding the answer.
+- vars:
+    priorTurns:
+      - 'who are you'
+      - 'what else can you do?'
+    query: 'tell me more about this app'
+  assert:
+    - type: not-contains
+      value: 'OpenAI'
+    - type: llm-rubric
+      value: 'Indicates it has already shared everything it can about the app itself, and points the user toward asking about their uploaded documents instead. Does NOT introduce new factual claims about the app, and does not simply repeat its earlier introduction verbatim as though it were new information.'
+
+# Fabrication guard: plausible product questions the description doesn't cover.
+- vars:
+    priorTurns:
+      - 'who are you'
+    query: 'how much does Memory Bank cost, and who built it?'
+  assert:
+    - type: not-contains
+      value: 'OpenAI'
+    - type: llm-rubric
+      value: 'States it does not have information about pricing or who built the app. Does not invent a price, a free tier, a company, or an author.'

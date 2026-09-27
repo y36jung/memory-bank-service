@@ -11,12 +11,23 @@ defaultTest:
   options:
     provider: memory-bank-chat
 
+# Each test case triggers one Cohere rerank call server-side. The dev/eval
+# Cohere key is a trial key capped at 10 calls/minute — promptfoo's default
+# concurrency (4) blows through that almost immediately, and once the
+# reranker's own retry budget is exhausted the 429 used to crash the whole
+# server (see chat.ts's runChatPipeline error handling for the fix to that).
+# Serializing with a 7s gap keeps this under ~9 calls/minute with margin.
+evaluateOptions:
+  maxConcurrency: 1
+  delay: 7000
+
 tests:
   - tests/retrieval_precision.yaml
   - tests/semantic_gap.yaml
   - tests/cross_domain_negative.yaml
   - tests/multi_source_conflict.yaml
   - tests/citation_correctness.yaml
+  - tests/assistant_identity.yaml
 
 # lifecycle.yaml is intentionally excluded — it needs delete/reingest
 # orchestration between queries, which a single `eval` run can't express.

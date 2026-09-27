@@ -843,4 +843,52 @@ describe('AC-RERANK-CONF: retrieve() — post-rerank low-confidence', () => {
       expect(result.lowConfidence).toBe(true);
     }
   });
+
+  it('AC-IRRELEVANT-1: a top rerank score below the irrelevance floor returns zero chunks, not a weak match', async () => {
+    // Strong vector score, so the cosine backoff is satisfied — this is the
+    // realistic shape of an off-topic question against a populated corpus: HyDE
+    // prose resembles arbitrary prose, so *something* always clears 0.05 cosine,
+    // and only Cohere (scoring the raw query) reveals that none of it is on
+    // topic. Reporting zero chunks is what routes the caller to its fixed
+    // refusal instead of handing GPT-4o noise to hedge over.
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-2', score: 0.9 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([rerankConfDbRow]) as unknown as ReturnType<typeof db.select>,
+    );
+    vi.mocked(rerankerModule.rerank).mockImplementation(
+      async (_query: string, chunks: RetrievedChunk[], topN: number) =>
+        chunks.slice(0, topN).map((c) => ({ ...c, score: 0.01 })),
+    );
+
+    const result = await retrieve(TEST_USER_ID, "what's the maintenance schedule for my car?");
+
+    expect(result.type).toBe('chunk_results');
+    if (result.type === 'chunk_results') {
+      expect(result.chunks).toEqual([]);
+      // Not "found something weak" — found nothing. Matches every other
+      // zero-chunk return in retrieve().
+      expect(result.lowConfidence).toBe(false);
+    }
+  });
+
+  it('AC-IRRELEVANT-2: a score above the irrelevance floor but below the hedge threshold still returns the chunk', async () => {
+    // Guards the gap between the two thresholds: 0.05 ≤ score < 0.3 must keep
+    // hedging rather than collapse into a refusal.
+    vi.mocked(qdrant.searchPoints).mockResolvedValue([{ id: 'qdrant-uuid-2', score: 0.9 }]);
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([rerankConfDbRow]) as unknown as ReturnType<typeof db.select>,
+    );
+    vi.mocked(rerankerModule.rerank).mockImplementation(
+      async (_query: string, chunks: RetrievedChunk[], topN: number) =>
+        chunks.slice(0, topN).map((c) => ({ ...c, score: 0.06 })),
+    );
+
+    const result = await retrieve(TEST_USER_ID, 'query');
+
+    expect(result.type).toBe('chunk_results');
+    if (result.type === 'chunk_results') {
+      expect(result.chunks).toHaveLength(1);
+      expect(result.lowConfidence).toBe(true);
+    }
+  });
 });

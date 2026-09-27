@@ -1,12 +1,35 @@
-# Negative cases: no matching content, keyword-overlap traps, false premises.
+# Negative cases: no matching content, keyword-overlap traps, false premises,
+# and general knowledge the assistant is not allowed to answer from.
+#
+# Nothing here is answerable from the corpus, and only app-identity questions may
+# be answered without retrieval — so each of these must land on the fixed
+# "no relevant documents" reply from src/services/chat.ts. Where the query is
+# unambiguously outside the corpus, assert on that literal text: it's
+# deterministic and needs no grader. Where a query could legitimately match
+# something, keep the rubric so a real retrieval improvement doesn't read as a
+# regression.
 
 - vars:
     query: "What's the maintenance schedule for my car's timing belt?"
   assert:
-    - type: llm-rubric
-      value: 'States it cannot find relevant information in the knowledge base rather than fabricating an answer.'
+    - type: contains
+      value: "couldn't find any relevant documents"
     - type: not-contains
       value: 'timing belt should be replaced'
+
+# Moved from citation_correctness.yaml, where it asserted the answer contained
+# '4'. General knowledge is no longer an exception to document grounding: with no
+# math in the corpus, this refuses like any other unanswerable question.
+- vars:
+    query: "What's 2 + 2?"
+  assert:
+    - type: javascript
+      value: |
+        // Refusing must not drag irrelevant sources in alongside the refusal.
+        const sources = context.metadata?.sources || [];
+        return sources.length === 0;
+    - type: contains
+      value: "couldn't find any relevant documents"
 
 - vars:
     query: "What's my travel insurance deductible?"

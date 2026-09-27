@@ -7,16 +7,21 @@
  * its `where()` stub is a pass-through — it cannot exercise real predicate
  * evaluation (in particular `jsonb_array_length`).
  *
- * Also covers the one exemption from that filter: NO_RELEVANT_DOCS_MESSAGE
- * also has empty sources (retrieval genuinely found nothing) but is
- * app-authored, not model-authored, so it's known-trustworthy and kept in
- * history — unlike an arbitrary empty-sources reply, which is still dropped.
+ * Also covers the two exemptions from that filter: NO_RELEVANT_DOCS_MESSAGE
+ * (retrieval genuinely found nothing) and APP_INTRO_MESSAGE (the app's own
+ * description) also have empty sources but are app-authored, not
+ * model-authored, so they're known-trustworthy and kept in history — unlike an
+ * arbitrary empty-sources reply, which is still dropped.
  *
  * Calls loadHistory() directly (not through streamChatResponse / the HTTP
  * route) so this suite never needs a real or mocked OpenAI call.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { loadHistory, NO_RELEVANT_DOCS_MESSAGE } from '../../src/services/chat.js';
+import {
+  loadHistory,
+  NO_RELEVANT_DOCS_MESSAGE,
+  APP_INTRO_MESSAGE,
+} from '../../src/services/chat.js';
 import { seedUser, seedChatSession } from './helpers/seed.js';
 import { db, pool } from '../../src/db/index.js';
 import { messages } from '../../src/db/schema.js';
@@ -106,6 +111,30 @@ describe('loadHistory — SQL-level groundedness filter', () => {
       NO_RELEVANT_DOCS_MESSAGE,
       'q2 — can you expand on that?',
       'q3',
+    ]);
+  });
+
+  it('keeps the canned APP_INTRO_MESSAGE reply but drops a model-authored identity follow-up', async () => {
+    const sessionId = await seedSession();
+    await insertTurn(sessionId, 0, 'user', 'who are you');
+    // App-authored intro — empty sources, exempted by content match. Keeping it
+    // is what lets an identity follow-up see the app was already described, so
+    // it can say there's nothing more instead of repeating itself.
+    await insertTurn(sessionId, 1, 'assistant', APP_INTRO_MESSAGE, []);
+    await insertTurn(sessionId, 2, 'user', 'what else can you do?');
+    // The follow-up's own reply is model-authored with empty sources, so it is
+    // deliberately NOT exempted — later turns see the fixed intro and the
+    // user's repeated asks, never the model's paraphrase of itself.
+    await insertTurn(sessionId, 3, 'assistant', "That's everything I can share about the app.", []);
+    await insertTurn(sessionId, 4, 'user', 'tell me more about this app');
+
+    const history = await loadHistory(sessionId, { mode: 'full_session' });
+
+    expect(history.map((m) => m.content)).toEqual([
+      'who are you',
+      APP_INTRO_MESSAGE,
+      'what else can you do?',
+      'tell me more about this app',
     ]);
   });
 });

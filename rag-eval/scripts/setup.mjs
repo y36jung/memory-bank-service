@@ -72,16 +72,20 @@ async function pollUntilIndexed(
       );
     }
 
-    const res = await fetch(`${baseUrl}/api/documents`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      throw new Error(`Failed to list documents: HTTP ${res.status}: ${await res.text()}`);
-    }
-    const { data } = await res.json();
+    // Checked by id rather than listed — GET /api/documents paginates
+    // (default limit 20), and stale documents from earlier local eval runs
+    // can push newly uploaded ones off the first page.
+    for (const documentId of pending.keys()) {
+      const res = await fetch(`${baseUrl}/api/documents/${documentId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(
+          `Failed to fetch document ${documentId}: HTTP ${res.status}: ${await res.text()}`,
+        );
+      }
+      const { data: doc } = await res.json();
 
-    for (const doc of data.items) {
-      if (!pending.has(doc.id)) continue;
       if (doc.status === 'indexed') {
         pending.delete(doc.id);
       } else if (doc.status === 'failed') {
