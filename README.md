@@ -47,7 +47,7 @@ Built with: **Node.js + TypeScript**, **Fastify**, **Drizzle ORM**, **PostgreSQL
 ## ✨ Key Features
 
 - 📥 **File upload ingestion** — upload files (`.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.xlsx`); email/cloud-drive sync (Gmail, Google Drive, Outlook, OneDrive) is planned as a future addition
-- 🎙️ **Media support (TBD)** — audio transcription via Whisper, image/video understanding via GPT-4o Vision 
+- 🎙️ **Media support (TBD)** — audio transcription via Whisper, image/video understanding via GPT-4o Vision
 - 🔄 **Durable ingestion pipeline** — BullMQ-backed 11-step pipeline with per-step timeouts, automatic retries, and a supervisor backstop
 - 💬 **Streaming RAG** — real-time GPT-4o answers with cited sources streamed over SSE
 - 🔁 **Idempotent vector indexing** — deterministic Qdrant point IDs (`uuidv5(documentId + chunkIndex)`) make retries safe with no duplicates
