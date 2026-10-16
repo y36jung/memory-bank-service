@@ -36,6 +36,37 @@ function listFixtureFiles(dir) {
   return files;
 }
 
+// Every run re-uploads the full corpus, so without this the eval user collects
+// one extra copy of each fixture per run. Duplicate copies fill retrieval's
+// top-k with the same chunk under different documentIds, crowding out other
+// relevant chunks and skewing every retrieval assertion.
+async function deleteExistingDocuments(baseUrl, token) {
+  const ids = [];
+  let totalPages = 1;
+  for (let page = 1; page <= totalPages; page++) {
+    const res = await fetch(`${baseUrl}/api/documents?page=${page}&limit=100`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to list documents: HTTP ${res.status}: ${await res.text()}`);
+    }
+    const { data } = await res.json();
+    ids.push(...data.items.map((d) => d.id));
+    totalPages = data.totalPages;
+  }
+
+  for (const id of ids) {
+    const res = await fetch(`${baseUrl}/api/documents/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to delete document ${id}: HTTP ${res.status}: ${await res.text()}`);
+    }
+  }
+  return ids.length;
+}
+
 async function uploadFixture(baseUrl, token, filePath) {
   const filename = filePath.split('/').pop();
   const mimeType = MIME_TYPES[extname(filename)] || 'application/octet-stream';
@@ -107,6 +138,9 @@ async function main() {
 
   console.log(`Authenticating as ${EVAL_USER_EMAIL}...`);
   const token = await getAccessToken(BASE_URL, EVAL_USER_EMAIL, EVAL_USER_PASSWORD);
+
+  const deleted = await deleteExistingDocuments(BASE_URL, token);
+  console.log(`Removed ${deleted} existing document(s) from earlier runs.`);
 
   const files = listFixtureFiles(FIXTURES_DIR);
   console.log(`Uploading ${files.length} fixture document(s)...`);

@@ -9,7 +9,7 @@ providers:
 
 defaultTest:
   options:
-    provider: naive-rag
+    provider: openai:gpt-4o # grader for llm-rubric — see promptfooconfig.yaml
 
 tests:
   - tests/retrieval_precision.yaml
