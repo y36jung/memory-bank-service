@@ -7,9 +7,13 @@ providers:
   - id: file://providers/memory-bank-provider.js
     label: memory-bank-chat
 
+# `options.provider` is the GRADER for model-graded asserts (llm-rubric), not the
+# provider under test. Pointing it at memory-bank-chat sent every rubric prompt
+# through the RAG pipeline itself — non-JSON grades, plus an extra Cohere rerank
+# call per case that blew the trial key's rate limit. Grade with OpenAI instead.
 defaultTest:
   options:
-    provider: memory-bank-chat
+    provider: openai:gpt-4o
 
 # Each test case triggers one Cohere rerank call server-side. The dev/eval
 # Cohere key is a trial key capped at 10 calls/minute — promptfoo's default

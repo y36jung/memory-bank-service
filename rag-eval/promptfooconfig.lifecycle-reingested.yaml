@@ -9,7 +9,7 @@ providers:
 
 defaultTest:
   options:
-    provider: memory-bank-chat
+    provider: openai:gpt-4o # grader for llm-rubric — see promptfooconfig.yaml
 
 tests:
   - tests/lifecycle_reingested.yaml

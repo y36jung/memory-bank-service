@@ -38,8 +38,6 @@ Build a RAG backend that ingests content from personal knowledge sources — sta
 | 2   | The service automatically organises ingested content into coherent knowledge topics      | Chunks are embedded and retrievable by semantic similarity without manual tagging      |
 | 3   | The chatbot returns accurate, source-cited answers grounded in the user's knowledge base | Responses include citations; the model declines to answer when context is insufficient |
 
-> Metrics TBD — define precision/recall targets and upload success-rate thresholds before M1 sign-off.
-
 ## 📖 Description
 
 Memory Bank ingests content from file uploads, chunks and embeds it using OpenAI, and answers natural-language questions with GPT-4o over a streaming SSE response. Postgres is the single source of truth for all content; Qdrant serves as the vector index and is fully rebuildable at any time.
@@ -53,6 +51,14 @@ Built with: **Node.js + TypeScript**, **Fastify**, **Drizzle ORM**, **PostgreSQL
 - 🔄 **Durable ingestion pipeline** — BullMQ-backed 11-step pipeline with per-step timeouts, automatic retries, and a supervisor backstop
 - 💬 **Streaming RAG** — real-time GPT-4o answers with cited sources streamed over SSE
 - 🔁 **Idempotent vector indexing** — deterministic Qdrant point IDs (`uuidv5(documentId + chunkIndex)`) make retries safe with no duplicates
+
+## 🧩 Why No LangChain?
+
+I built the retrieval pipeline from scratch on purpose. A main goal of this project was to understand how LLM systems work under the hood: chunking, embedding, retrieval, reranking, and prompting. Frameworks like LangChain hide those steps, so I wrote each one myself.
+
+## 🖥️ Frontend
+
+The UI lives in a separate repo: [memory-bank-ui](https://github.com/y36jung/memory-bank-ui). I built it quickly with AI tools so I could spend my time on the backend and retrieval.
 
 ## 🚀 Installation & Usage
 
