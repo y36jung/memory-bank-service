@@ -56,6 +56,10 @@ Built with: **Node.js + TypeScript**, **Fastify**, **Drizzle ORM**, **PostgreSQL
 
 I built the retrieval pipeline from scratch on purpose. A main goal of this project was to understand how LLM systems work under the hood: chunking, embedding, retrieval, reranking, and prompting. Frameworks like LangChain hide those steps, so I wrote each one myself.
 
+## 🧗 Engineering Challenges
+
+Building this project meant solving some hard problems in retrieval, security and hosting. To read how I approached each one and which tradeoffs I accepted, see [ENGINEERING_CHALLENGES.md](ENGINEERING_CHALLENGES.md).
+
 ## 🖥️ Frontend
 
 The UI lives in a separate repo: [memory-bank-ui](https://github.com/y36jung/memory-bank-ui). I built it quickly with AI tools so I could spend my time on the backend and retrieval.
