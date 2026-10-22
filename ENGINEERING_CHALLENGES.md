@@ -195,6 +195,7 @@ promptfoo runs 4 test cases at once by default, so it hit the limit almost right
 ### Current workaround
 
 - I set `maxConcurrency: 1` and `delay: 7000` in the promptfoo config. The suite now runs one test case at a time, with a 7-second gap between them. This keeps it at about 8.5 calls per minute, safely under the limit.
+- The delay has to be set on the provider entry, not under `evaluateOptions`. promptfoo 0.121.x silently ignores `evaluateOptions.delay`, so for a while the suite ran with no gap at all and some cases failed with rate-limit errors instead of real answers.
 
 ### Tradeoffs
 

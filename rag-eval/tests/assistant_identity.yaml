@@ -144,7 +144,7 @@
     - type: not-contains
       value: 'Memory Bank assistant'
     - type: llm-rubric
-      value: "Draws on the user's own travel documents (packing guidance, destination information) rather than introducing the app or describing its own capabilities."
+      value: "References specific travel content from the user's documents — e.g. the trip types, destinations, or packing guidance they cover — rather than introducing the app or describing its own capabilities in general terms. Asking the user for more trip details is fine, as long as the reply is grounded in that document content."
 
 - vars:
     query: 'help me prepare for my trip'
