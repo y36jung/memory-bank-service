@@ -16,13 +16,19 @@
 - vars:
     query: 'If I put money away in my 20s instead of my 30s, does it actually make a big difference by the time I retire?'
   assert:
+    # Document-level only: sources are deduped to one chunk per document
+    # (chat.ts dedupeSourcesByDocument), and this query ranks the document's
+    # intro chunk above the Alex/Jordan chunk, so a content-substring check
+    # fails even when the right chunk reached the model.
     - type: javascript
       value: |
         const sources = context.metadata?.sources || [];
-        return sources.some(s =>
-          s.documentName === 'retirement_planning.md' &&
-          s.content?.includes('Alex invests $5,000/year from age 25 to 35')
-        );
+        return sources.some(s => s.documentName === 'retirement_planning.md');
+    # Stands in for the chunk-level check: $602,000 is a fixture-specific
+    # figure that appears only in the Alex/Jordan passage, so it can't come
+    # from the model's training knowledge.
+    - type: contains
+      value: '602,000'
     - type: llm-rubric
       value: 'States that starting earlier (even with a smaller total contribution) results in more money at retirement than starting later with a larger total contribution, due to compound interest — referencing something like the Alex/Jordan comparison.'
 

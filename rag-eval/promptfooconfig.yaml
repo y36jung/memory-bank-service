@@ -6,6 +6,10 @@ prompts:
 providers:
   - id: file://providers/memory-bank-provider.js
     label: memory-bank-chat
+    # Rate-limit spacing for Cohere rerank — see evaluateOptions below for why.
+    # Must live on the provider: promptfoo 0.121.x silently ignores
+    # evaluateOptions.delay (runs logged `provider.delay = 0` with 1–4s gaps).
+    delay: 7000
 
 # `options.provider` is the GRADER for model-graded asserts (llm-rubric), not the
 # provider under test. Pointing it at memory-bank-chat sent every rubric prompt
@@ -20,10 +24,10 @@ defaultTest:
 # concurrency (4) blows through that almost immediately, and once the
 # reranker's own retry budget is exhausted the 429 used to crash the whole
 # server (see chat.ts's runChatPipeline error handling for the fix to that).
-# Serializing with a 7s gap keeps this under ~9 calls/minute with margin.
+# Serializing with a 7s gap (the provider-level `delay` above) keeps this
+# under ~9 calls/minute with margin.
 evaluateOptions:
   maxConcurrency: 1
-  delay: 7000
 
 tests:
   - tests/retrieval_precision.yaml
